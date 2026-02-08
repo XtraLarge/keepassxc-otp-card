@@ -227,7 +227,6 @@ customElements.define('keepassxc-otp-card-editor', KeePassXCOTPCardEditor);
 class KeePassXCOTPCard extends HTMLElement {
   constructor() {
     super();
-    this._buttonTimeouts = new Map(); // Track timeouts per button to prevent race conditions
     this._rendered = false;  // Track if we've done initial render
     this._entities = [];     // Store current entities
   }
@@ -273,12 +272,6 @@ class KeePassXCOTPCard extends HTMLElement {
       clearInterval(this._updateInterval);
       this._updateInterval = null;
     }
-    
-    // Clean up any pending button timeouts
-    if (this._buttonTimeouts) {
-      this._buttonTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
-      this._buttonTimeouts.clear();
-    }
   }
 
   updateGauges() {
@@ -315,6 +308,28 @@ class KeePassXCOTPCard extends HTMLElement {
       const gaugeText = svg.querySelector('.gauge-text');
       if (gaugeText) {
         gaugeText.textContent = `${timeRemaining}s`;
+      }
+    });
+    
+    // Clean up expired button states
+    this.updateButtonStates();
+  }
+
+  updateButtonStates() {
+    // Clean up expired "Copied!" states
+    const now = Date.now();
+    this.querySelectorAll('.copy-button[data-state]').forEach(button => {
+      const copiedAt = parseInt(button.dataset.copiedAt || '0');
+      if (now - copiedAt > 3000) {
+        // State expired - reset button
+        delete button.dataset.state;
+        delete button.dataset.copiedAt;
+        
+        // Reset button content
+        const icon = button.querySelector('.copy-icon');
+        const text = button.querySelector('.copy-text');
+        if (icon) icon.textContent = '📋';
+        if (text) text.textContent = 'Copy';
       }
     });
   }
@@ -527,94 +542,34 @@ class KeePassXCOTPCard extends HTMLElement {
     }
   }
 
-  /**
-   * Show the "Copied!" success state on the copy button
-   * @param {HTMLElement} button - The copy button element
-   * @param {string} entityId - The entity ID for stable timeout tracking across re-renders
-   * 
-   * Uses entityId instead of button reference as the timeout map key because:
-   * - entityId is stable across DOM updates/re-renders
-   * - Button references can become stale if DOM is modified
-   * - Prevents memory leaks from holding stale DOM references
-   */
   showCopiedState(button, entityId) {
-    // Clear any existing timeout for this button
-    if (this._buttonTimeouts.has(entityId)) {
-      clearTimeout(this._buttonTimeouts.get(entityId));
-    }
+    // Store state as data attribute with timestamp
+    button.dataset.state = 'copied';
+    button.dataset.copiedAt = Date.now().toString();
     
-    // Change button to "Copied!" state
+    // Update button content immediately
     const icon = button.querySelector('.copy-icon');
     const text = button.querySelector('.copy-text');
     
-    if (!icon || !text) {
-      console.warn('Button structure invalid for entity:', entityId);
-      return;
-    }
+    if (icon) icon.textContent = '✅';
+    if (text) text.textContent = 'Copied!';
     
-    // Save original content
-    const originalIcon = icon.textContent;
-    const originalText = text.textContent;
-    
-    // Change to success state
-    icon.textContent = '✅';
-    text.textContent = 'Copied!';
-    button.classList.add('copied');
-    
-    // Reset after 3 seconds
-    const timeoutId = setTimeout(() => {
-      icon.textContent = originalIcon;
-      text.textContent = originalText;
-      button.classList.remove('copied');
-      this._buttonTimeouts.delete(entityId);
-    }, 3000);
-    
-    this._buttonTimeouts.set(entityId, timeoutId);
+    // No timeout needed - updateButtonStates() will clean it up
   }
 
-  /**
-   * Show the "Error!" state on the copy button when copying fails
-   * @param {HTMLElement} button - The copy button element
-   * @param {string} entityId - The entity ID for stable timeout tracking across re-renders
-   * 
-   * Uses entityId instead of button reference as the timeout map key because:
-   * - entityId is stable across DOM updates/re-renders
-   * - Button references can become stale if DOM is modified
-   * - Prevents memory leaks from holding stale DOM references
-   */
   showErrorState(button, entityId) {
-    // Clear any existing timeout for this button
-    if (this._buttonTimeouts.has(entityId)) {
-      clearTimeout(this._buttonTimeouts.get(entityId));
-    }
+    // Store state as data attribute with timestamp
+    button.dataset.state = 'error';
+    button.dataset.copiedAt = Date.now().toString();
     
-    // Change button to "Error!" state
+    // Update button content immediately
     const icon = button.querySelector('.copy-icon');
     const text = button.querySelector('.copy-text');
     
-    if (!icon || !text) {
-      console.warn('Button structure invalid for entity:', entityId);
-      return;
-    }
+    if (icon) icon.textContent = '❌';
+    if (text) text.textContent = 'Error!';
     
-    // Save original content
-    const originalIcon = icon.textContent;
-    const originalText = text.textContent;
-    
-    // Change to error state
-    icon.textContent = '❌';
-    text.textContent = 'Error!';
-    button.classList.add('error');
-    
-    // Reset after 3 seconds
-    const timeoutId = setTimeout(() => {
-      icon.textContent = originalIcon;
-      text.textContent = originalText;
-      button.classList.remove('error');
-      this._buttonTimeouts.delete(entityId);
-    }, 3000);
-    
-    this._buttonTimeouts.set(entityId, timeoutId);
+    // No timeout needed - updateButtonStates() will clean it up
   }
 
   copyToClipboardFallback(text) {
@@ -755,7 +710,7 @@ class KeePassXCOTPCard extends HTMLElement {
         cursor: pointer;
         font-size: 14px;
         font-weight: 500;
-        transition: all 0.2s ease;
+        transition: background 0.2s ease, transform 0.1s ease;
         white-space: nowrap;
         flex-shrink: 0;
       }
@@ -766,12 +721,12 @@ class KeePassXCOTPCard extends HTMLElement {
       .copy-button:active {
         transform: translateY(0);
       }
-      .copy-button.copied {
-        background: #4caf50;
+      .copy-button[data-state="copied"] {
+        background: #4caf50 !important;
         animation: pulse 0.3s ease;
       }
-      .copy-button.error {
-        background: #f44336;
+      .copy-button[data-state="error"] {
+        background: #f44336 !important;
         animation: shake 0.3s ease;
       }
       @keyframes pulse {
