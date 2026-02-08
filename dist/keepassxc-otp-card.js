@@ -1,7 +1,7 @@
 class KeePassXCOTPCardEditor extends HTMLElement {
   setConfig(config) {
     this._config = { ...config };
-    if (!this.content) {
+    if (!this._initialized) {
       this.innerHTML = `
         <div class="card-config">
           <div class="option">
@@ -43,7 +43,7 @@ class KeePassXCOTPCardEditor extends HTMLElement {
           ${this.getStyles()}
         </style>
       `;
-      this.content = true;
+      this._initialized = true;
       
       // Set checkbox state after rendering
       const showPersonCheckbox = this.querySelector('#show_person');
@@ -65,13 +65,17 @@ class KeePassXCOTPCardEditor extends HTMLElement {
     const personSelect = this.querySelector('#person_entity_id');
     const showPersonCheckbox = this.querySelector('#show_person');
 
-    titleInput.addEventListener('input', (e) => {
+    titleInput.addEventListener('change', (e) => {
       this._config.title = e.target.value;
       this._fireConfigChanged();
     });
 
     personSelect.addEventListener('change', (e) => {
-      this._config.person_entity_id = e.target.value;
+      if (e.target.value) {
+        this._config.person_entity_id = e.target.value;
+      } else {
+        delete this._config.person_entity_id;
+      }
       this._fireConfigChanged();
     });
 
