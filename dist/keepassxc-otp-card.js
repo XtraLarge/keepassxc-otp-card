@@ -527,6 +527,16 @@ class KeePassXCOTPCard extends HTMLElement {
     }
   }
 
+  /**
+   * Show the "Copied!" success state on the copy button
+   * @param {HTMLElement} button - The copy button element
+   * @param {string} entityId - The entity ID for stable timeout tracking across re-renders
+   * 
+   * Uses entityId instead of button reference as the timeout map key because:
+   * - entityId is stable across DOM updates/re-renders
+   * - Button references can become stale if DOM is modified
+   * - Prevents memory leaks from holding stale DOM references
+   */
   showCopiedState(button, entityId) {
     // Clear any existing timeout for this button
     if (this._buttonTimeouts.has(entityId)) {
@@ -562,6 +572,16 @@ class KeePassXCOTPCard extends HTMLElement {
     this._buttonTimeouts.set(entityId, timeoutId);
   }
 
+  /**
+   * Show the "Error!" state on the copy button when copying fails
+   * @param {HTMLElement} button - The copy button element
+   * @param {string} entityId - The entity ID for stable timeout tracking across re-renders
+   * 
+   * Uses entityId instead of button reference as the timeout map key because:
+   * - entityId is stable across DOM updates/re-renders
+   * - Button references can become stale if DOM is modified
+   * - Prevents memory leaks from holding stale DOM references
+   */
   showErrorState(button, entityId) {
     // Clear any existing timeout for this button
     if (this._buttonTimeouts.has(entityId)) {
