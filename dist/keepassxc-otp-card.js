@@ -509,13 +509,13 @@ class KeePassXCOTPCard extends HTMLElement {
     text.textContent = 'Copied!';
     button.classList.add('copied');
     
-    // Reset after 2 seconds
+    // Reset after 3 seconds
     const timeoutId = setTimeout(() => {
       icon.textContent = originalIcon;
       text.textContent = originalText;
       button.classList.remove('copied');
       this._buttonTimeouts.delete(button);
-    }, 2000);
+    }, 3000);
     
     this._buttonTimeouts.set(button, timeoutId);
   }
@@ -545,13 +545,13 @@ class KeePassXCOTPCard extends HTMLElement {
     text.textContent = 'Error!';
     button.classList.add('error');
     
-    // Reset after 2 seconds
+    // Reset after 3 seconds
     const timeoutId = setTimeout(() => {
       icon.textContent = originalIcon;
       text.textContent = originalText;
       button.classList.remove('error');
       this._buttonTimeouts.delete(button);
-    }, 2000);
+    }, 3000);
     
     this._buttonTimeouts.set(button, timeoutId);
   }
@@ -680,6 +680,7 @@ class KeePassXCOTPCard extends HTMLElement {
         user-select: all;
         flex: 1;
         min-width: 0;
+        /* No hover effect - token is not interactive */
       }
       .copy-button {
         display: flex;
