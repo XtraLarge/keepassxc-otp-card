@@ -320,7 +320,7 @@ class KeePassXCOTPCard extends HTMLElement {
     const now = Date.now();
     this.querySelectorAll('.copy-button[data-state]').forEach(button => {
       const copiedAt = parseInt(button.dataset.copiedAt || '0');
-      if (now - copiedAt > 3000) {
+      if (now - copiedAt > 1000) {
         // State expired - reset button
         delete button.dataset.state;
         delete button.dataset.copiedAt;
