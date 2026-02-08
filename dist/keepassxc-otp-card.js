@@ -225,6 +225,11 @@ class KeePassXCOTPCardEditor extends HTMLElement {
 customElements.define('keepassxc-otp-card-editor', KeePassXCOTPCardEditor);
 
 class KeePassXCOTPCard extends HTMLElement {
+  constructor() {
+    super();
+    this._buttonTimeouts = new Map(); // Track timeouts per button to prevent race conditions
+  }
+
   setConfig(config) {
     if (!config) {
       throw new Error('Invalid configuration');
@@ -265,6 +270,12 @@ class KeePassXCOTPCard extends HTMLElement {
     if (this._updateInterval) {
       clearInterval(this._updateInterval);
       this._updateInterval = null;
+    }
+    
+    // Clean up any pending button timeouts
+    if (this._buttonTimeouts) {
+      this._buttonTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
+      this._buttonTimeouts.clear();
     }
   }
 
@@ -478,6 +489,17 @@ class KeePassXCOTPCard extends HTMLElement {
     const icon = button.querySelector('.copy-icon');
     const text = button.querySelector('.copy-text');
     
+    // Add null checks for safety
+    if (!icon || !text) {
+      console.error('Button structure is invalid - missing icon or text elements');
+      return;
+    }
+    
+    // Clear any existing timeout for this button to prevent race conditions
+    if (this._buttonTimeouts.has(button)) {
+      clearTimeout(this._buttonTimeouts.get(button));
+    }
+    
     // Save original content
     const originalIcon = icon.textContent;
     const originalText = text.textContent;
@@ -488,17 +510,31 @@ class KeePassXCOTPCard extends HTMLElement {
     button.classList.add('copied');
     
     // Reset after 2 seconds
-    setTimeout(() => {
+    const timeoutId = setTimeout(() => {
       icon.textContent = originalIcon;
       text.textContent = originalText;
       button.classList.remove('copied');
+      this._buttonTimeouts.delete(button);
     }, 2000);
+    
+    this._buttonTimeouts.set(button, timeoutId);
   }
 
   showErrorState(button) {
     // Change button to "Error!" state
     const icon = button.querySelector('.copy-icon');
     const text = button.querySelector('.copy-text');
+    
+    // Add null checks for safety
+    if (!icon || !text) {
+      console.error('Button structure is invalid - missing icon or text elements');
+      return;
+    }
+    
+    // Clear any existing timeout for this button to prevent race conditions
+    if (this._buttonTimeouts.has(button)) {
+      clearTimeout(this._buttonTimeouts.get(button));
+    }
     
     // Save original content
     const originalIcon = icon.textContent;
@@ -510,11 +546,14 @@ class KeePassXCOTPCard extends HTMLElement {
     button.classList.add('error');
     
     // Reset after 2 seconds
-    setTimeout(() => {
+    const timeoutId = setTimeout(() => {
       icon.textContent = originalIcon;
       text.textContent = originalText;
       button.classList.remove('error');
+      this._buttonTimeouts.delete(button);
     }, 2000);
+    
+    this._buttonTimeouts.set(button, timeoutId);
   }
 
   copyToClipboardFallback(text) {
