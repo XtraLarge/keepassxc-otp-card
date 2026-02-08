@@ -128,17 +128,17 @@ class KeePassXCOTPCard extends HTMLElement {
       // Try modern Clipboard API first (requires HTTPS or localhost)
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(token);
-        this.showToast(`✅ Copied ${token}`, name);
+        this.showToast(`✅ Token copied to clipboard`, name);
       } else {
         // Fallback for HTTP or older browsers
         this.copyToClipboardFallback(token);
-        this.showToast(`📋 Copied ${token}`, name);
+        this.showToast(`📋 Token copied to clipboard`, name);
       }
     } catch (err) {
       console.error('Copy failed, trying fallback:', err);
       try {
         this.copyToClipboardFallback(token);
-        this.showToast(`📋 Copied ${token}`, name);
+        this.showToast(`📋 Token copied to clipboard`, name);
       } catch (fallbackErr) {
         console.error('Fallback copy also failed:', fallbackErr);
         this.showToast('❌ Copy failed', name);
@@ -150,6 +150,7 @@ class KeePassXCOTPCard extends HTMLElement {
     // Create temporary input element
     const input = document.createElement('input');
     input.style.position = 'fixed';
+    input.style.left = '-9999px';
     input.style.opacity = '0';
     input.style.pointerEvents = 'none';
     input.value = text;
@@ -172,10 +173,19 @@ class KeePassXCOTPCard extends HTMLElement {
     // Create toast notification element
     const toast = document.createElement('div');
     toast.className = 'otp-toast';
-    toast.innerHTML = `
-      <div class="toast-title">${title || 'KeePassXC OTP'}</div>
-      <div class="toast-message">${message}</div>
-    `;
+    
+    // Create title element
+    const titleElement = document.createElement('div');
+    titleElement.className = 'toast-title';
+    titleElement.textContent = title || 'KeePassXC OTP';
+    
+    // Create message element
+    const messageElement = document.createElement('div');
+    messageElement.className = 'toast-message';
+    messageElement.textContent = message;
+    
+    toast.appendChild(titleElement);
+    toast.appendChild(messageElement);
     
     document.body.appendChild(toast);
     
