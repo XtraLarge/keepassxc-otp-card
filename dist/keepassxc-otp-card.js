@@ -278,8 +278,12 @@ class KeePassXCOTPCard extends HTMLElement {
       const entity = this._hass.states[entityId];
       if (!entity) return;
       
-      const timeRemaining = entity.attributes.time_remaining || 0;
       const period = entity.attributes.period || 30;
+      
+      // Calculate time remaining LOCALLY using current timestamp
+      const now = Math.floor(Date.now() / 1000);
+      const timeRemaining = period - (now % period);
+      
       const percentage = (timeRemaining / period) * 100;
       
       // Update gauge color
@@ -360,13 +364,16 @@ class KeePassXCOTPCard extends HTMLElement {
 
   renderOTPEntry(entity) {
     const token = entity.state;
-    const timeRemaining = entity.attributes.time_remaining || 0;
     const period = entity.attributes.period || 30;
     const issuer = entity.attributes.issuer || '';
     const account = entity.attributes.account || '';
     const name = entity.attributes.friendly_name || entity.entity_id;
     const url = entity.attributes.url || null;
     const username = entity.attributes.username || null;
+    
+    // Calculate time remaining LOCALLY using current timestamp
+    const now = Math.floor(Date.now() / 1000);
+    const timeRemaining = period - (now % period);
     
     // Calculate percentage and color
     const percentage = (timeRemaining / period) * 100;
@@ -490,6 +497,8 @@ class KeePassXCOTPCard extends HTMLElement {
   }
 
   showToast(title, message) {
+    console.log('showToast called:', title, message);
+    
     // Remove any existing toast
     const existingToast = document.querySelector('.otp-toast');
     if (existingToast) {
@@ -515,13 +524,21 @@ class KeePassXCOTPCard extends HTMLElement {
     
     document.body.appendChild(toast);
     
+    console.log('Toast appended to body, classes:', toast.className);
+    
     // Trigger animation
-    setTimeout(() => toast.classList.add('show'), 10);
+    setTimeout(() => {
+      toast.classList.add('show');
+      console.log('Toast show class added');
+    }, 10);
     
     // Auto-dismiss after 3 seconds
     setTimeout(() => {
       toast.classList.remove('show');
-      setTimeout(() => toast.remove(), 300);
+      setTimeout(() => {
+        toast.remove();
+        console.log('Toast removed');
+      }, 300);
     }, 3000);
   }
 
@@ -619,16 +636,15 @@ class KeePassXCOTPCard extends HTMLElement {
         color: var(--primary-color);
         cursor: pointer;
         user-select: none;
-        transition: color 0.2s ease;
         padding: 8px 0;
         display: inline-block;
+        transition: opacity 0.2s ease, transform 0.1s ease;
       }
       .otp-token:hover {
-        color: var(--accent-color);
+        opacity: 0.8;
       }
       .otp-token:active {
         transform: scale(0.98);
-        transition: transform 0.1s ease;
       }
       .otp-details {
         font-size: 12px;
@@ -658,34 +674,37 @@ class KeePassXCOTPCard extends HTMLElement {
         bottom: 80px;
         left: 50%;
         transform: translateX(-50%) translateY(100px);
-        background: var(--card-background-color);
-        color: var(--primary-text-color);
+        background: var(--card-background-color, #fff);
+        color: var(--primary-text-color, #000);
         padding: 16px 24px;
         border-radius: 8px;
         box-shadow: 0 6px 16px rgba(0,0,0,0.3);
-        border: 1px solid var(--primary-color);
-        z-index: 10000;
+        border: 2px solid var(--primary-color, #039be5);
+        z-index: 99999;
         min-width: 280px;
         max-width: 400px;
         opacity: 0;
         transition: all 0.3s ease;
         text-align: center;
+        pointer-events: none;
       }
       .otp-toast.show {
         transform: translateX(-50%) translateY(0);
         opacity: 1;
+        pointer-events: auto;
       }
       .toast-title {
         font-weight: 600;
         font-size: 14px;
         margin-bottom: 8px;
-        color: var(--primary-color);
+        color: var(--primary-color, #039be5);
       }
       .toast-message {
         font-size: 20px;
         font-family: 'Roboto Mono', 'Courier New', monospace;
         letter-spacing: 3px;
         font-weight: 600;
+        color: var(--primary-text-color, #000);
       }
     `;
   }
