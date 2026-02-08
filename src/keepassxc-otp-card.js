@@ -135,14 +135,28 @@ class KeePassXCOTPCard extends HTMLElement {
         </div>
       `;
       this._rendered = false;
+      this._entities = [];
       return;
     }
 
     // ✅ Only render HTML if not yet rendered OR entity list changed
-    const entityIds = otpEntities.map(e => e.entity_id).join(',');
-    const prevEntityIds = this._entities.map(e => e.entity_id).join(',');
+    // Check if entity list changed (more efficient comparison)
+    let entitiesChanged = false;
+    if (!this._rendered) {
+      entitiesChanged = true;
+    } else if (otpEntities.length !== this._entities.length) {
+      entitiesChanged = true;
+    } else {
+      // Same length, check if IDs match
+      for (let i = 0; i < otpEntities.length; i++) {
+        if (otpEntities[i].entity_id !== this._entities[i].entity_id) {
+          entitiesChanged = true;
+          break;
+        }
+      }
+    }
     
-    if (!this._rendered || entityIds !== prevEntityIds) {
+    if (entitiesChanged) {
       // Full render needed - entities added/removed
       this.content.innerHTML = otpEntities.map(entity => this.renderOTPEntry(entity)).join('');
       
