@@ -50,16 +50,31 @@ A beautiful Lovelace card for displaying OTP tokens from the [KeePassXC OTP Inte
 
 ---
 
-## 🎨 Usage
+## 🎨 Configuration
 
-### Basic Card (Show All Tokens)
+### Visual Editor
+
+The card includes a visual configuration editor:
+
+1. Click "Add Card" in Lovelace
+2. Search for "KeePassXC OTP Card"
+3. Configure using the visual editor:
+   - **Title**: Card header text
+   - **Person Filter**: Show tokens for specific person only
+   - **Show Person Names**: Display person name in token details
+
+### YAML Configuration
+
+You can also configure the card manually in YAML:
+
+#### Basic Card (Show All Tokens)
 
 ```yaml
 type: custom:keepassxc-otp-card
 title: 🔐 My OTP Tokens
 ```
 
-### Show Tokens for Specific Person
+#### Show Tokens for Specific Person
 
 ```yaml
 type: custom:keepassxc-otp-card
@@ -67,7 +82,7 @@ title: 🔐 Alice's OTP Tokens
 person_entity_id: person.alice
 ```
 
-### Show Person Names
+#### Show Person Names
 
 ```yaml
 type: custom:keepassxc-otp-card
@@ -75,7 +90,7 @@ title: 🔐 All OTP Tokens
 show_person: true
 ```
 
-### Minimal Configuration
+#### Minimal Configuration
 
 ```yaml
 type: custom:keepassxc-otp-card
@@ -85,12 +100,12 @@ type: custom:keepassxc-otp-card
 
 ## ⚙️ Configuration Options
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `type` | string | **Required** | Must be `custom:keepassxc-otp-card` |
-| `title` | string | `🔐 KeePassXC OTP` | Card title |
-| `person_entity_id` | string | `null` | Filter by person entity (e.g., `person.alice`) |
-| `show_person` | boolean | `false` | Show person name in token details |
+| Option | Type | Default | Description | Visual Editor |
+|--------|------|---------|-------------|---------------|
+| `type` | string | **Required** | Must be `custom:keepassxc-otp-card` | N/A |
+| `title` | string | `🔐 KeePassXC OTP` | Card title | ✅ Text input |
+| `person_entity_id` | string | `null` | Filter by person entity | ✅ Dropdown selector |
+| `show_person` | boolean | `false` | Show person name in details | ✅ Checkbox |
 
 ---
 
