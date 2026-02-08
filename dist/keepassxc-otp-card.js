@@ -537,7 +537,10 @@ class KeePassXCOTPCard extends HTMLElement {
     const icon = button.querySelector('.copy-icon');
     const text = button.querySelector('.copy-text');
     
-    if (!icon || !text) return;
+    if (!icon || !text) {
+      console.warn('Button structure invalid for entity:', entityId);
+      return;
+    }
     
     // Save original content
     const originalIcon = icon.textContent;
@@ -569,7 +572,10 @@ class KeePassXCOTPCard extends HTMLElement {
     const icon = button.querySelector('.copy-icon');
     const text = button.querySelector('.copy-text');
     
-    if (!icon || !text) return;
+    if (!icon || !text) {
+      console.warn('Button structure invalid for entity:', entityId);
+      return;
+    }
     
     // Save original content
     const originalIcon = icon.textContent;
