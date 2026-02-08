@@ -57,7 +57,8 @@ class KeePassXCOTPCard extends HTMLElement {
         this._animationFrameId = requestAnimationFrame(animate);
       } catch (error) {
         console.error('KeePassXC OTP Card: Animation loop error:', error);
-        // Self-healing: restart loop after error
+        // Self-healing: clear animation ID and restart loop after error
+        this._animationFrameId = null;
         setTimeout(() => this.startAnimationLoop(), 1000);
       }
     };
@@ -67,7 +68,7 @@ class KeePassXCOTPCard extends HTMLElement {
   }
 
   updateGaugesAndButtons() {
-    // Throttle to ~1 second intervals (60 FPS / 60 = 1 Hz)
+    // Throttle to 1 second intervals using timestamp comparison
     const now = Date.now();
     if (now - this._lastUpdateTime < 1000) {
       return;  // Skip this frame
@@ -118,7 +119,7 @@ class KeePassXCOTPCard extends HTMLElement {
           const now = Math.floor(Date.now() / 1000);
           const timeRemaining = period - (now % period);
           
-          // Validate time remaining is sane
+          // Validate time remaining is sane (defensive check)
           if (timeRemaining < 0 || timeRemaining > period) {
             console.warn(`KeePassXC OTP: Invalid time remaining: ${timeRemaining}`);
             return;
