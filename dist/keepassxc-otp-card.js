@@ -228,6 +228,8 @@ class KeePassXCOTPCard extends HTMLElement {
   constructor() {
     super();
     this._buttonTimeouts = new Map(); // Track timeouts per button to prevent race conditions
+    this._rendered = false;  // Track if we've done initial render
+    this._entities = [];     // Store current entities
   }
 
   setConfig(config) {
@@ -358,20 +360,61 @@ class KeePassXCOTPCard extends HTMLElement {
           <p class="hint">Add the KeePassXC OTP integration to get started.</p>
         </div>
       `;
+      this._rendered = false;
+      this._entities = [];
       return;
     }
 
-    // Render all OTP entries
-    this.content.innerHTML = otpEntities.map(entity => this.renderOTPEntry(entity)).join('');
+    // ✅ Only render HTML if not yet rendered OR entity list changed
+    // Check if entity list changed (more efficient comparison)
+    let entitiesChanged = false;
+    if (!this._rendered) {
+      entitiesChanged = true;
+    } else if (otpEntities.length !== this._entities.length) {
+      entitiesChanged = true;
+    } else {
+      // Same length, check if IDs match
+      for (let i = 0; i < otpEntities.length; i++) {
+        if (otpEntities[i].entity_id !== this._entities[i].entity_id) {
+          entitiesChanged = true;
+          break;
+        }
+      }
+    }
     
-    // Add click handlers for copy buttons
-    this.content.querySelectorAll('.copy-button').forEach(button => {
-      button.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        const entityId = e.currentTarget.dataset.entityId;
-        this.copyTokenWithButton(e.currentTarget, entityId);
+    if (entitiesChanged) {
+      // Full render needed - entities added/removed
+      this.content.innerHTML = otpEntities.map(entity => this.renderOTPEntry(entity)).join('');
+      
+      // Add click handlers for copy buttons
+      this.content.querySelectorAll('.copy-button').forEach(button => {
+        button.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const entityId = e.currentTarget.dataset.entityId;
+          this.copyTokenWithButton(e.currentTarget, entityId);
+        });
       });
+      
+      this._rendered = true;
+      this._entities = otpEntities;
+    } else {
+      // ✅ Just update token values dynamically (no re-render!)
+      this.updateTokenValues(otpEntities);
+    }
+  }
+
+  updateTokenValues(entities) {
+    // Update token values without destroying the DOM
+    entities.forEach(entity => {
+      const tokenElement = this.content.querySelector(`.otp-token[data-entity-id="${entity.entity_id}"]`);
+      if (tokenElement) {
+        const token = entity.state;
+        const formattedToken = token.length === 6 
+          ? token.slice(0, 3) + ' ' + token.slice(3)
+          : token;
+        tokenElement.textContent = formattedToken;
+      }
     });
   }
 
@@ -446,7 +489,7 @@ class KeePassXCOTPCard extends HTMLElement {
         <div class="otp-info">
           <div class="otp-name">${name}</div>
           <div class="otp-token-row">
-            <div class="otp-token">${formattedToken}</div>
+            <div class="otp-token" data-entity-id="${entity.entity_id}">${formattedToken}</div>
             <button class="copy-button" data-entity-id="${entity.entity_id}" title="Copy to clipboard">
               <span class="copy-icon">📋</span>
               <span class="copy-text">Copy</span>
