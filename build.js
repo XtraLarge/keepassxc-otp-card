@@ -32,9 +32,9 @@ try {
   fs.writeFileSync(outputFile, combinedContent, 'utf8');
 
   console.log('✓ Build successful');
-  console.log(`  - Combined ${editorFile}`);
-  console.log(`  - Combined ${cardFile}`);
-  console.log(`  - Output: ${outputFile}`);
+  console.log(`  - Included ${path.basename(editorFile)}`);
+  console.log(`  - Included ${path.basename(cardFile)}`);
+  console.log(`  - Output: ${path.basename(outputFile)}`);
 } catch (error) {
   console.error('✗ Build failed:', error.message);
   process.exit(1);

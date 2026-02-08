@@ -52,16 +52,24 @@ class KeePassXCOTPCardEditor extends HTMLElement {
       
       const showPersonCheckbox = this.querySelector('#show_person');
       if (showPersonCheckbox) {
-        showPersonCheckbox.checked = this._config.show_person || false;
+        showPersonCheckbox.checked = this._config.show_person === true;
       }
       
       this._setupListeners();
+      
+      // Populate person selector if hass is already available
+      if (this._hass) {
+        this._populatePersonSelector();
+      }
     }
   }
 
   set hass(hass) {
     this._hass = hass;
-    this._populatePersonSelector();
+    // Only populate selector if already initialized
+    if (this._initialized) {
+      this._populatePersonSelector();
+    }
   }
 
   _setupListeners() {
