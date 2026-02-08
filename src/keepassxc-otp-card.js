@@ -162,7 +162,7 @@ class KeePassXCOTPCard extends HTMLElement {
     try {
       const successful = document.execCommand('copy');
       if (!successful) {
-        throw new Error('execCommand copy returned false');
+        throw new Error('Failed to copy to clipboard');
       }
     } finally {
       document.body.removeChild(input);
@@ -196,9 +196,7 @@ class KeePassXCOTPCard extends HTMLElement {
     setTimeout(() => {
       toast.classList.remove('show');
       setTimeout(() => {
-        if (toast.parentNode) {
-          document.body.removeChild(toast);
-        }
+        toast.remove();
       }, 300);
     }, 3000);
   }
