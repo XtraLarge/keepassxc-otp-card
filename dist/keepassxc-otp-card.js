@@ -348,45 +348,78 @@ class KeePassXCOTPCard extends HTMLElement {
   async copyToken(entityId) {
     const state = this._hass.states[entityId];
     const token = state.state;
-    const personName = state.attributes.person_name || '';
+    const name = state.attributes.friendly_name || entityId;
     
     try {
-      // Try modern clipboard API
-      await navigator.clipboard.writeText(token);
-      this.showNotification('✅ Token copied to clipboard!', personName);
+      // Try modern Clipboard API first (requires HTTPS or localhost)
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(token);
+        this.showToast(`✅ Copied ${token}`, name);
+      } else {
+        // Fallback for HTTP or older browsers
+        this.copyToClipboardFallback(token);
+        this.showToast(`📋 Copied ${token}`, name);
+      }
     } catch (err) {
-      console.error('Failed to copy token:', err);
-      // Fallback: try to use Home Assistant service
+      console.error('Copy failed, trying fallback:', err);
       try {
-        await this._hass.callService('keepassxc_otp', 'copy_token', {
-          entity_id: entityId
-        });
-        this.showNotification('📋 Token sent to notification', personName);
-      } catch (serviceErr) {
-        console.error('Service call failed:', serviceErr);
-        this.showNotification('❌ Failed to copy token', personName);
+        this.copyToClipboardFallback(token);
+        this.showToast(`📋 Copied ${token}`, name);
+      } catch (fallbackErr) {
+        console.error('Fallback copy also failed:', fallbackErr);
+        this.showToast('❌ Copy failed', name);
       }
     }
   }
 
-  showNotification(message, personName) {
-    const notificationId = `otp_copy_${Date.now()}`;
+  copyToClipboardFallback(text) {
+    // Create temporary input element
+    const input = document.createElement('input');
+    input.style.position = 'fixed';
+    input.style.opacity = '0';
+    input.style.pointerEvents = 'none';
+    input.value = text;
     
-    this._hass.callService('persistent_notification', 'create', {
-      message: message,
-      title: `KeePassXC OTP${personName ? ` (${personName})` : ''}`,
-      notification_id: notificationId
-    });
+    document.body.appendChild(input);
+    input.focus();
+    input.select();
+    
+    try {
+      const successful = document.execCommand('copy');
+      if (!successful) {
+        throw new Error('execCommand copy returned false');
+      }
+    } finally {
+      document.body.removeChild(input);
+    }
+  }
+
+  showToast(message, title) {
+    // Create toast notification element
+    const toast = document.createElement('div');
+    toast.className = 'otp-toast';
+    toast.innerHTML = `
+      <div class="toast-title">${title || 'KeePassXC OTP'}</div>
+      <div class="toast-message">${message}</div>
+    `;
+    
+    document.body.appendChild(toast);
+    
+    // Trigger animation
+    setTimeout(() => toast.classList.add('show'), 10);
     
     // Auto-dismiss after 3 seconds
     setTimeout(() => {
-      this._hass.callService('persistent_notification', 'dismiss', {
-        notification_id: notificationId
-      }).catch(() => {
-        // Ignore errors on dismiss
-      });
+      toast.classList.remove('show');
+      setTimeout(() => {
+        if (toast.parentNode) {
+          document.body.removeChild(toast);
+        }
+      }, 300);
     }, 3000);
   }
+
+
 
   getStyles() {
     return `
@@ -474,15 +507,16 @@ class KeePassXCOTPCard extends HTMLElement {
         color: var(--primary-color);
         cursor: pointer;
         user-select: none;
-        transition: transform 0.1s ease, color 0.2s ease;
+        transition: color 0.2s ease;
         padding: 8px 0;
+        display: inline-block;
       }
       .otp-token:hover {
-        transform: scale(1.05);
         color: var(--accent-color);
       }
       .otp-token:active {
-        transform: scale(0.95);
+        transform: scale(0.98);
+        transition: transform 0.1s ease;
       }
       .otp-details {
         font-size: 12px;
@@ -491,6 +525,39 @@ class KeePassXCOTPCard extends HTMLElement {
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+      }
+      
+      /* Toast Notification Styles */
+      .otp-toast {
+        position: fixed;
+        bottom: 20px;
+        left: 50%;
+        transform: translateX(-50%) translateY(100px);
+        background: var(--card-background-color);
+        color: var(--primary-text-color);
+        padding: 16px 24px;
+        border-radius: 8px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        z-index: 10000;
+        min-width: 250px;
+        max-width: 400px;
+        opacity: 0;
+        transition: all 0.3s ease;
+      }
+      .otp-toast.show {
+        transform: translateX(-50%) translateY(0);
+        opacity: 1;
+      }
+      .toast-title {
+        font-weight: 600;
+        font-size: 14px;
+        margin-bottom: 4px;
+        color: var(--primary-color);
+      }
+      .toast-message {
+        font-size: 16px;
+        font-family: 'Roboto Mono', 'Courier New', monospace;
+        letter-spacing: 2px;
       }
     `;
   }
