@@ -509,39 +509,35 @@ class KeePassXCOTPCard extends HTMLElement {
       // Try modern Clipboard API first (requires HTTPS or localhost)
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(token);
-        this.showCopiedState(button);
+        this.showCopiedState(button, entityId);
       } else {
         // Fallback for HTTP or older browsers
         this.copyToClipboardFallback(token);
-        this.showCopiedState(button);
+        this.showCopiedState(button, entityId);
       }
     } catch (err) {
       console.error('Copy failed, trying fallback:', err);
       try {
         this.copyToClipboardFallback(token);
-        this.showCopiedState(button);
+        this.showCopiedState(button, entityId);
       } catch (fallbackErr) {
         console.error('Fallback copy also failed:', fallbackErr);
-        this.showErrorState(button);
+        this.showErrorState(button, entityId);
       }
     }
   }
 
-  showCopiedState(button) {
+  showCopiedState(button, entityId) {
+    // Clear any existing timeout for this button
+    if (this._buttonTimeouts.has(entityId)) {
+      clearTimeout(this._buttonTimeouts.get(entityId));
+    }
+    
     // Change button to "Copied!" state
     const icon = button.querySelector('.copy-icon');
     const text = button.querySelector('.copy-text');
     
-    // Add null checks for safety
-    if (!icon || !text) {
-      console.error('Button structure is invalid - missing icon or text elements');
-      return;
-    }
-    
-    // Clear any existing timeout for this button to prevent race conditions
-    if (this._buttonTimeouts.has(button)) {
-      clearTimeout(this._buttonTimeouts.get(button));
-    }
+    if (!icon || !text) return;
     
     // Save original content
     const originalIcon = icon.textContent;
@@ -557,27 +553,23 @@ class KeePassXCOTPCard extends HTMLElement {
       icon.textContent = originalIcon;
       text.textContent = originalText;
       button.classList.remove('copied');
-      this._buttonTimeouts.delete(button);
+      this._buttonTimeouts.delete(entityId);
     }, 3000);
     
-    this._buttonTimeouts.set(button, timeoutId);
+    this._buttonTimeouts.set(entityId, timeoutId);
   }
 
-  showErrorState(button) {
+  showErrorState(button, entityId) {
+    // Clear any existing timeout for this button
+    if (this._buttonTimeouts.has(entityId)) {
+      clearTimeout(this._buttonTimeouts.get(entityId));
+    }
+    
     // Change button to "Error!" state
     const icon = button.querySelector('.copy-icon');
     const text = button.querySelector('.copy-text');
     
-    // Add null checks for safety
-    if (!icon || !text) {
-      console.error('Button structure is invalid - missing icon or text elements');
-      return;
-    }
-    
-    // Clear any existing timeout for this button to prevent race conditions
-    if (this._buttonTimeouts.has(button)) {
-      clearTimeout(this._buttonTimeouts.get(button));
-    }
+    if (!icon || !text) return;
     
     // Save original content
     const originalIcon = icon.textContent;
@@ -593,10 +585,10 @@ class KeePassXCOTPCard extends HTMLElement {
       icon.textContent = originalIcon;
       text.textContent = originalText;
       button.classList.remove('error');
-      this._buttonTimeouts.delete(button);
+      this._buttonTimeouts.delete(entityId);
     }, 3000);
     
-    this._buttonTimeouts.set(button, timeoutId);
+    this._buttonTimeouts.set(entityId, timeoutId);
   }
 
   copyToClipboardFallback(text) {
@@ -827,7 +819,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c KEEPASSXC-OTP-CARD %c v1.0.0 ',
+  '%c KEEPASSXC-OTP-CARD %c v2.0.0 ',
   'color: white; background: #039be5; font-weight: 700;',
   'color: #039be5; background: white; font-weight: 700;'
 );
