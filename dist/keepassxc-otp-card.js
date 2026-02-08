@@ -225,6 +225,11 @@ class KeePassXCOTPCardEditor extends HTMLElement {
 customElements.define('keepassxc-otp-card-editor', KeePassXCOTPCardEditor);
 
 class KeePassXCOTPCard extends HTMLElement {
+  constructor() {
+    super();
+    this._buttonTimeouts = new Map(); // Track timeouts per button to prevent race conditions
+  }
+
   setConfig(config) {
     if (!config) {
       throw new Error('Invalid configuration');
@@ -265,6 +270,12 @@ class KeePassXCOTPCard extends HTMLElement {
     if (this._updateInterval) {
       clearInterval(this._updateInterval);
       this._updateInterval = null;
+    }
+    
+    // Clean up any pending button timeouts
+    if (this._buttonTimeouts) {
+      this._buttonTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
+      this._buttonTimeouts.clear();
     }
   }
 
@@ -353,11 +364,13 @@ class KeePassXCOTPCard extends HTMLElement {
     // Render all OTP entries
     this.content.innerHTML = otpEntities.map(entity => this.renderOTPEntry(entity)).join('');
     
-    // Add click handlers for copy
-    this.content.querySelectorAll('.otp-token').forEach(el => {
-      el.addEventListener('click', (e) => {
+    // Add click handlers for copy buttons
+    this.content.querySelectorAll('.copy-button').forEach(button => {
+      button.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
         const entityId = e.currentTarget.dataset.entityId;
-        this.copyToken(entityId);
+        this.copyTokenWithButton(e.currentTarget, entityId);
       });
     });
   }
@@ -432,8 +445,12 @@ class KeePassXCOTPCard extends HTMLElement {
         </div>
         <div class="otp-info">
           <div class="otp-name">${name}</div>
-          <div class="otp-token" data-entity-id="${entity.entity_id}" title="Click to copy">
-            ${formattedToken}
+          <div class="otp-token-row">
+            <div class="otp-token">${formattedToken}</div>
+            <button class="copy-button" data-entity-id="${entity.entity_id}" title="Copy to clipboard">
+              <span class="copy-icon">📋</span>
+              <span class="copy-text">Copy</span>
+            </button>
           </div>
           ${detailsHtml ? `<div class="otp-details">${detailsHtml}</div>` : ''}
         </div>
@@ -441,36 +458,102 @@ class KeePassXCOTPCard extends HTMLElement {
     `;
   }
 
-  async copyToken(entityId) {
+  async copyTokenWithButton(button, entityId) {
     const state = this._hass.states[entityId];
     const token = state.state;
-    const name = state.attributes.friendly_name || state.attributes.issuer || entityId;
-    
-    // Format token for display (e.g., "123 456")
-    const formattedToken = token.length === 6 
-      ? token.slice(0, 3) + ' ' + token.slice(3)
-      : token;
     
     try {
       // Try modern Clipboard API first (requires HTTPS or localhost)
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(token);
-        this.showToast(`✅ Copied to clipboard!`, formattedToken);
+        this.showCopiedState(button);
       } else {
         // Fallback for HTTP or older browsers
         this.copyToClipboardFallback(token);
-        this.showToast(`📋 Copied to clipboard!`, formattedToken);
+        this.showCopiedState(button);
       }
     } catch (err) {
       console.error('Copy failed, trying fallback:', err);
       try {
         this.copyToClipboardFallback(token);
-        this.showToast(`📋 Copied to clipboard!`, formattedToken);
+        this.showCopiedState(button);
       } catch (fallbackErr) {
         console.error('Fallback copy also failed:', fallbackErr);
-        this.showToast('❌ Copy failed', name);
+        this.showErrorState(button);
       }
     }
+  }
+
+  showCopiedState(button) {
+    // Change button to "Copied!" state
+    const icon = button.querySelector('.copy-icon');
+    const text = button.querySelector('.copy-text');
+    
+    // Add null checks for safety
+    if (!icon || !text) {
+      console.error('Button structure is invalid - missing icon or text elements');
+      return;
+    }
+    
+    // Clear any existing timeout for this button to prevent race conditions
+    if (this._buttonTimeouts.has(button)) {
+      clearTimeout(this._buttonTimeouts.get(button));
+    }
+    
+    // Save original content
+    const originalIcon = icon.textContent;
+    const originalText = text.textContent;
+    
+    // Change to success state
+    icon.textContent = '✅';
+    text.textContent = 'Copied!';
+    button.classList.add('copied');
+    
+    // Reset after 2 seconds
+    const timeoutId = setTimeout(() => {
+      icon.textContent = originalIcon;
+      text.textContent = originalText;
+      button.classList.remove('copied');
+      this._buttonTimeouts.delete(button);
+    }, 2000);
+    
+    this._buttonTimeouts.set(button, timeoutId);
+  }
+
+  showErrorState(button) {
+    // Change button to "Error!" state
+    const icon = button.querySelector('.copy-icon');
+    const text = button.querySelector('.copy-text');
+    
+    // Add null checks for safety
+    if (!icon || !text) {
+      console.error('Button structure is invalid - missing icon or text elements');
+      return;
+    }
+    
+    // Clear any existing timeout for this button to prevent race conditions
+    if (this._buttonTimeouts.has(button)) {
+      clearTimeout(this._buttonTimeouts.get(button));
+    }
+    
+    // Save original content
+    const originalIcon = icon.textContent;
+    const originalText = text.textContent;
+    
+    // Change to error state
+    icon.textContent = '❌';
+    text.textContent = 'Error!';
+    button.classList.add('error');
+    
+    // Reset after 2 seconds
+    const timeoutId = setTimeout(() => {
+      icon.textContent = originalIcon;
+      text.textContent = originalText;
+      button.classList.remove('error');
+      this._buttonTimeouts.delete(button);
+    }, 2000);
+    
+    this._buttonTimeouts.set(button, timeoutId);
   }
 
   copyToClipboardFallback(text) {
@@ -494,52 +577,6 @@ class KeePassXCOTPCard extends HTMLElement {
     } finally {
       document.body.removeChild(input);
     }
-  }
-
-  showToast(title, message) {
-    console.log('showToast called:', title, message);
-    
-    // Remove any existing toast
-    const existingToast = document.querySelector('.otp-toast');
-    if (existingToast) {
-      existingToast.remove();
-    }
-    
-    // Create toast element
-    const toast = document.createElement('div');
-    toast.className = 'otp-toast';
-    
-    // Create title element (use textContent for security)
-    const titleElement = document.createElement('div');
-    titleElement.className = 'toast-title';
-    titleElement.textContent = title;
-    
-    // Create message element (use textContent for security)
-    const messageElement = document.createElement('div');
-    messageElement.className = 'toast-message';
-    messageElement.textContent = message;
-    
-    toast.appendChild(titleElement);
-    toast.appendChild(messageElement);
-    
-    document.body.appendChild(toast);
-    
-    console.log('Toast appended to body, classes:', toast.className);
-    
-    // Trigger animation
-    setTimeout(() => {
-      toast.classList.add('show');
-      console.log('Toast show class added');
-    }, 10);
-    
-    // Auto-dismiss after 3 seconds
-    setTimeout(() => {
-      toast.classList.remove('show');
-      setTimeout(() => {
-        toast.remove();
-        console.log('Toast removed');
-      }, 300);
-    }, 3000);
   }
 
   escapeHtml(text) {
@@ -629,22 +666,68 @@ class KeePassXCOTPCard extends HTMLElement {
         overflow: hidden;
         text-overflow: ellipsis;
       }
+      .otp-token-row {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 4px;
+      }
       .otp-token {
         font-size: 32px;
         font-family: 'Roboto Mono', 'Courier New', monospace;
         letter-spacing: 4px;
         color: var(--primary-color);
+        user-select: all;
+        flex: 1;
+        min-width: 0;
+      }
+      .copy-button {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 16px;
+        background: var(--primary-color);
+        color: white;
+        border: none;
+        border-radius: 20px;
         cursor: pointer;
-        user-select: none;
-        padding: 8px 0;
-        display: inline-block;
-        transition: opacity 0.2s ease, transform 0.1s ease;
+        font-size: 14px;
+        font-weight: 500;
+        transition: all 0.2s ease;
+        white-space: nowrap;
+        flex-shrink: 0;
       }
-      .otp-token:hover {
-        opacity: 0.8;
+      .copy-button:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 8px rgba(0,0,0,0.2);
       }
-      .otp-token:active {
-        transform: scale(0.98);
+      .copy-button:active {
+        transform: translateY(0);
+      }
+      .copy-button.copied {
+        background: #4caf50;
+        animation: pulse 0.3s ease;
+      }
+      .copy-button.error {
+        background: #f44336;
+        animation: shake 0.3s ease;
+      }
+      @keyframes pulse {
+        0%, 100% { transform: scale(1); }
+        50% { transform: scale(1.05); }
+      }
+      @keyframes shake {
+        0%, 100% { transform: translateX(0); }
+        25% { transform: translateX(-5px); }
+        75% { transform: translateX(5px); }
+      }
+      .copy-icon {
+        font-size: 16px;
+        line-height: 1;
+      }
+      .copy-text {
+        font-size: 14px;
+        line-height: 1;
       }
       .otp-details {
         font-size: 12px;
@@ -666,45 +749,6 @@ class KeePassXCOTPCard extends HTMLElement {
       .otp-url:hover {
         color: var(--accent-color);
         text-decoration: underline;
-      }
-      
-      /* Toast Notification Styles */
-      .otp-toast {
-        position: fixed;
-        bottom: 80px;
-        left: 50%;
-        transform: translateX(-50%) translateY(100px);
-        background: var(--card-background-color, #fff);
-        color: var(--primary-text-color, #000);
-        padding: 16px 24px;
-        border-radius: 8px;
-        box-shadow: 0 6px 16px rgba(0,0,0,0.3);
-        border: 2px solid var(--primary-color, #039be5);
-        z-index: 99999;
-        min-width: 280px;
-        max-width: 400px;
-        opacity: 0;
-        transition: all 0.3s ease;
-        text-align: center;
-        pointer-events: none;
-      }
-      .otp-toast.show {
-        transform: translateX(-50%) translateY(0);
-        opacity: 1;
-        pointer-events: auto;
-      }
-      .toast-title {
-        font-weight: 600;
-        font-size: 14px;
-        margin-bottom: 8px;
-        color: var(--primary-color, #039be5);
-      }
-      .toast-message {
-        font-size: 20px;
-        font-family: 'Roboto Mono', 'Courier New', monospace;
-        letter-spacing: 3px;
-        font-weight: 600;
-        color: var(--primary-text-color, #000);
       }
     `;
   }
