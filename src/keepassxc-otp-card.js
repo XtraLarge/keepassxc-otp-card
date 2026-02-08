@@ -156,18 +156,23 @@ class KeePassXCOTPCard extends HTMLElement {
     // Build details line: Username • clickable URL
     let detailsHtml = '';
     
-    // Add username if available
+    // Add username if available (escape HTML for security)
     if (username) {
-      detailsHtml += `<span class="otp-username">${username}</span>`;
+      const escapedUsername = this.escapeHtml(username);
+      detailsHtml += `<span class="otp-username">${escapedUsername}</span>`;
     }
     
     // Add clickable URL if available
     if (url) {
       try {
         const urlObj = new URL(url);
-        const hostname = urlObj.hostname;
-        if (detailsHtml) detailsHtml += ' • ';
-        detailsHtml += `<a href="${url}" target="_blank" rel="noopener noreferrer" class="otp-url">🔗 ${hostname}</a>`;
+        // Only allow http and https protocols for security
+        if (urlObj.protocol === 'http:' || urlObj.protocol === 'https:') {
+          const hostname = urlObj.hostname;
+          const escapedUrl = this.escapeHtml(url);
+          if (detailsHtml) detailsHtml += ' • ';
+          detailsHtml += `<a href="${escapedUrl}" target="_blank" rel="noopener noreferrer" class="otp-url">🔗 ${hostname}</a>`;
+        }
       } catch (e) {
         // Invalid URL, ignore
       }
@@ -268,10 +273,19 @@ class KeePassXCOTPCard extends HTMLElement {
     // Create toast element
     const toast = document.createElement('div');
     toast.className = 'otp-toast';
-    toast.innerHTML = `
-      <div class="toast-title">${title}</div>
-      <div class="toast-message">${message}</div>
-    `;
+    
+    // Create title element (use textContent for security)
+    const titleElement = document.createElement('div');
+    titleElement.className = 'toast-title';
+    titleElement.textContent = title;
+    
+    // Create message element (use textContent for security)
+    const messageElement = document.createElement('div');
+    messageElement.className = 'toast-message';
+    messageElement.textContent = message;
+    
+    toast.appendChild(titleElement);
+    toast.appendChild(messageElement);
     
     document.body.appendChild(toast);
     
@@ -283,6 +297,13 @@ class KeePassXCOTPCard extends HTMLElement {
       toast.classList.remove('show');
       setTimeout(() => toast.remove(), 300);
     }, 3000);
+  }
+
+  escapeHtml(text) {
+    // Escape HTML special characters to prevent XSS
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   }
 
 
