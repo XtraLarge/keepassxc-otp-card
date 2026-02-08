@@ -3,6 +3,8 @@ class KeePassXCOTPCard extends HTMLElement {
     super();
     this._rendered = false;  // Track if we've done initial render
     this._entities = [];     // Store current entities
+    this._animationFrameId = null;  // Track animation frame
+    this._lastUpdateTime = 0;  // Track last update timestamp
   }
 
   setConfig(config) {
@@ -28,84 +30,170 @@ class KeePassXCOTPCard extends HTMLElement {
       this.content = this.querySelector('#otp-container');
     }
     
-    // Start auto-update timer (update every second)
-    if (this._updateInterval) {
-      clearInterval(this._updateInterval);
-    }
-    
-    this._updateInterval = setInterval(() => {
-      if (this._hass) {
-        this.updateGauges();
-      }
-    }, 1000); // Update every second
+    // Start animation loop (replaces setInterval)
+    this.startAnimationLoop();
   }
 
   disconnectedCallback() {
-    // Clean up interval when card is removed
-    if (this._updateInterval) {
-      clearInterval(this._updateInterval);
-      this._updateInterval = null;
+    // Clean up animation frame when card is removed
+    if (this._animationFrameId) {
+      cancelAnimationFrame(this._animationFrameId);
+      this._animationFrameId = null;
     }
   }
 
-  updateGauges() {
-    // Update all gauge displays without re-rendering entire card
-    const gauges = this.querySelectorAll('.circular-gauge');
-    gauges.forEach((svg) => {
-      const entityId = svg.dataset.entityId;
-      if (!entityId) return;
-      
-      const entity = this._hass.states[entityId];
-      if (!entity) return;
-      
-      const period = entity.attributes.period || 30;
-      
-      // Calculate time remaining LOCALLY using current timestamp
-      const now = Math.floor(Date.now() / 1000);
-      const timeRemaining = period - (now % period);
-      
-      const percentage = (timeRemaining / period) * 100;
-      
-      // Update gauge color
-      let gaugeColor = '#4caf50'; // green
-      if (percentage < 66) gaugeColor = '#ff9800'; // orange
-      if (percentage < 33) gaugeColor = '#f44336'; // red
-      
-      // Update gauge fill
-      const gaugeFill = svg.querySelector('.gauge-fill');
-      if (gaugeFill) {
-        gaugeFill.setAttribute('stroke', gaugeColor);
-        gaugeFill.setAttribute('stroke-dasharray', `${percentage}, 100`);
-      }
-      
-      // Update text
-      const gaugeText = svg.querySelector('.gauge-text');
-      if (gaugeText) {
-        gaugeText.textContent = `${timeRemaining}s`;
-      }
-    });
+  startAnimationLoop() {
+    // Stop any existing animation loop
+    if (this._animationFrameId) {
+      cancelAnimationFrame(this._animationFrameId);
+    }
     
-    // Clean up expired button states
+    const animate = () => {
+      try {
+        // Update gauges and button states
+        this.updateGaugesAndButtons();
+        
+        // Schedule next frame
+        this._animationFrameId = requestAnimationFrame(animate);
+      } catch (error) {
+        console.error('KeePassXC OTP Card: Animation loop error:', error);
+        // Self-healing: restart loop after error
+        setTimeout(() => this.startAnimationLoop(), 1000);
+      }
+    };
+    
+    // Start the loop
+    this._animationFrameId = requestAnimationFrame(animate);
+  }
+
+  updateGaugesAndButtons() {
+    // Throttle to ~1 second intervals (60 FPS / 60 = 1 Hz)
+    const now = Date.now();
+    if (now - this._lastUpdateTime < 1000) {
+      return;  // Skip this frame
+    }
+    this._lastUpdateTime = now;
+    
+    // Update both gauges and button states
+    this.updateGauges();
     this.updateButtonStates();
   }
 
-  updateButtonStates() {
-    // Clean up expired "Copied!" states
-    const now = Date.now();
-    this.querySelectorAll('.copy-button[data-state]').forEach(button => {
-      const copiedAt = parseInt(button.dataset.copiedAt || '0');
-      if (now - copiedAt > 1000) {
-        // State expired - reset button
-        delete button.dataset.state;
-        delete button.dataset.copiedAt;
-        
-        // Reset button content
-        const icon = button.querySelector('.copy-icon');
-        const text = button.querySelector('.copy-text');
-        if (icon) icon.textContent = '📋';
-        if (text) text.textContent = 'Copy';
+  updateGauges() {
+    // Validate _hass is available
+    if (!this._hass || !this._hass.states) {
+      return;
+    }
+    
+    // Validate DOM is ready
+    if (!this.content) {
+      return;
+    }
+    
+    try {
+      // Update all gauge displays without re-rendering entire card
+      const gauges = this.querySelectorAll('.circular-gauge');
+      
+      if (!gauges || gauges.length === 0) {
+        return;  // No gauges to update
       }
-    });
+      
+      gauges.forEach((svg) => {
+        try {
+          const entityId = svg.dataset.entityId;
+          if (!entityId) {
+            return;
+          }
+          
+          // Validate entity exists
+          const entity = this._hass.states[entityId];
+          if (!entity || !entity.attributes) {
+            console.warn(`KeePassXC OTP: Entity ${entityId} not found or invalid`);
+            return;
+          }
+          
+          const period = entity.attributes.period || 30;
+          
+          // Calculate time remaining LOCALLY using current timestamp
+          const now = Math.floor(Date.now() / 1000);
+          const timeRemaining = period - (now % period);
+          
+          // Validate time remaining is sane
+          if (timeRemaining < 0 || timeRemaining > period) {
+            console.warn(`KeePassXC OTP: Invalid time remaining: ${timeRemaining}`);
+            return;
+          }
+          
+          const percentage = (timeRemaining / period) * 100;
+          
+          // Update gauge color
+          let gaugeColor = '#4caf50'; // green
+          if (percentage < 66) gaugeColor = '#ff9800'; // orange
+          if (percentage < 33) gaugeColor = '#f44336'; // red
+          
+          // Validate gauge fill element exists
+          const gaugeFill = svg.querySelector('.gauge-fill');
+          if (gaugeFill) {
+            gaugeFill.setAttribute('stroke', gaugeColor);
+            gaugeFill.setAttribute('stroke-dasharray', `${percentage}, 100`);
+          } else {
+            console.warn(`KeePassXC OTP: gauge-fill element not found for ${entityId}`);
+          }
+          
+          // Validate gauge text element exists
+          const gaugeText = svg.querySelector('.gauge-text');
+          if (gaugeText) {
+            gaugeText.textContent = `${timeRemaining}s`;
+          } else {
+            console.warn(`KeePassXC OTP: gauge-text element not found for ${entityId}`);
+          }
+        } catch (gaugeError) {
+          console.error('KeePassXC OTP: Error updating individual gauge:', gaugeError);
+          // Continue with other gauges
+        }
+      });
+    } catch (error) {
+      console.error('KeePassXC OTP: Error in updateGauges:', error);
+    }
+  }
+
+  updateButtonStates() {
+    try {
+      // Validate DOM is ready
+      if (!this.content) {
+        return;
+      }
+      
+      // Clean up expired "Copied!" states
+      const now = Date.now();
+      const buttons = this.querySelectorAll('.copy-button[data-state]');
+      
+      if (!buttons || buttons.length === 0) {
+        return;  // No buttons to update
+      }
+      
+      buttons.forEach(button => {
+        try {
+          const copiedAt = parseInt(button.dataset.copiedAt || '0');
+          if (now - copiedAt > 1000) {  // 1 second timeout
+            // State expired - reset button
+            delete button.dataset.state;
+            delete button.dataset.copiedAt;
+            
+            // Reset button content
+            const icon = button.querySelector('.copy-icon');
+            const text = button.querySelector('.copy-text');
+            if (icon) icon.textContent = '📋';
+            if (text) text.textContent = 'Copy';
+          }
+        } catch (buttonError) {
+          console.error('KeePassXC OTP: Error updating button state:', buttonError);
+          // Continue with other buttons
+        }
+      });
+    } catch (error) {
+      console.error('KeePassXC OTP: Error in updateButtonStates:', error);
+    }
   }
 
   set hass(hass) {
