@@ -21,6 +21,59 @@ class KeePassXCOTPCard extends HTMLElement {
       this.appendChild(card);
       this.content = this.querySelector('#otp-container');
     }
+    
+    // Start auto-update timer (update every second)
+    if (this._updateInterval) {
+      clearInterval(this._updateInterval);
+    }
+    
+    this._updateInterval = setInterval(() => {
+      if (this._hass) {
+        this.updateGauges();
+      }
+    }, 1000); // Update every second
+  }
+
+  disconnectedCallback() {
+    // Clean up interval when card is removed
+    if (this._updateInterval) {
+      clearInterval(this._updateInterval);
+      this._updateInterval = null;
+    }
+  }
+
+  updateGauges() {
+    // Update all gauge displays without re-rendering entire card
+    const gauges = this.querySelectorAll('.circular-gauge');
+    gauges.forEach((svg) => {
+      const entityId = svg.dataset.entityId;
+      if (!entityId) return;
+      
+      const entity = this._hass.states[entityId];
+      if (!entity) return;
+      
+      const timeRemaining = entity.attributes.time_remaining || 0;
+      const period = entity.attributes.period || 30;
+      const percentage = (timeRemaining / period) * 100;
+      
+      // Update gauge color
+      let gaugeColor = '#4caf50'; // green
+      if (percentage < 66) gaugeColor = '#ff9800'; // orange
+      if (percentage < 33) gaugeColor = '#f44336'; // red
+      
+      // Update gauge fill
+      const gaugeFill = svg.querySelector('.gauge-fill');
+      if (gaugeFill) {
+        gaugeFill.setAttribute('stroke', gaugeColor);
+        gaugeFill.setAttribute('stroke-dasharray', `${percentage}, 100`);
+      }
+      
+      // Update text
+      const gaugeText = svg.querySelector('.gauge-text');
+      if (gaugeText) {
+        gaugeText.textContent = `${timeRemaining}s`;
+      }
+    });
   }
 
   set hass(hass) {
@@ -87,17 +140,7 @@ class KeePassXCOTPCard extends HTMLElement {
     const account = entity.attributes.account || '';
     const name = entity.attributes.friendly_name || entity.entity_id;
     const url = entity.attributes.url || null;
-    
-    // Extract hostname from URL if available
-    let displayUrl = null;
-    if (url) {
-      try {
-        const urlObj = new URL(url);
-        displayUrl = urlObj.hostname;
-      } catch (e) {
-        // Invalid URL, ignore
-      }
-    }
+    const username = entity.attributes.username || null;
     
     // Calculate percentage and color
     const percentage = (timeRemaining / period) * 100;
@@ -110,19 +153,30 @@ class KeePassXCOTPCard extends HTMLElement {
       ? token.slice(0, 3) + ' ' + token.slice(3)
       : token;
     
-    // Build details line: Issuer • Account (if different) • URL
-    let details = issuer || '';
-    if (account && account !== issuer) {
-      details += details ? ` • ${account}` : account;
+    // Build details line: Username • clickable URL
+    let detailsHtml = '';
+    
+    // Add username if available
+    if (username) {
+      detailsHtml += `<span class="otp-username">${username}</span>`;
     }
-    if (displayUrl) {
-      details += details ? ` • 🔗 ${displayUrl}` : `🔗 ${displayUrl}`;
+    
+    // Add clickable URL if available
+    if (url) {
+      try {
+        const urlObj = new URL(url);
+        const hostname = urlObj.hostname;
+        if (detailsHtml) detailsHtml += ' • ';
+        detailsHtml += `<a href="${url}" target="_blank" rel="noopener noreferrer" class="otp-url">🔗 ${hostname}</a>`;
+      } catch (e) {
+        // Invalid URL, ignore
+      }
     }
     
     return `
       <div class="otp-entry">
         <div class="gauge-container">
-          <svg viewBox="0 0 36 36" class="circular-gauge">
+          <svg viewBox="0 0 36 36" class="circular-gauge" data-entity-id="${entity.entity_id}">
             <path class="gauge-bg"
               d="M18 2.0845
                 a 15.9155 15.9155 0 0 1 0 31.831
@@ -143,7 +197,7 @@ class KeePassXCOTPCard extends HTMLElement {
           <div class="otp-token" data-entity-id="${entity.entity_id}" title="Click to copy">
             ${formattedToken}
           </div>
-          ${details ? `<div class="otp-details">${details}</div>` : ''}
+          ${detailsHtml ? `<div class="otp-details">${detailsHtml}</div>` : ''}
         </div>
       </div>
     `;
@@ -204,23 +258,20 @@ class KeePassXCOTPCard extends HTMLElement {
     }
   }
 
-  showToast(message, title) {
-    // Create toast notification element
+  showToast(title, message) {
+    // Remove any existing toast
+    const existingToast = document.querySelector('.otp-toast');
+    if (existingToast) {
+      existingToast.remove();
+    }
+    
+    // Create toast element
     const toast = document.createElement('div');
     toast.className = 'otp-toast';
-    
-    // Create title element
-    const titleElement = document.createElement('div');
-    titleElement.className = 'toast-title';
-    titleElement.textContent = title || 'KeePassXC OTP';
-    
-    // Create message element
-    const messageElement = document.createElement('div');
-    messageElement.className = 'toast-message';
-    messageElement.textContent = message;
-    
-    toast.appendChild(titleElement);
-    toast.appendChild(messageElement);
+    toast.innerHTML = `
+      <div class="toast-title">${title}</div>
+      <div class="toast-message">${message}</div>
+    `;
     
     document.body.appendChild(toast);
     
@@ -230,9 +281,7 @@ class KeePassXCOTPCard extends HTMLElement {
     // Auto-dismiss after 3 seconds
     setTimeout(() => {
       toast.classList.remove('show');
-      setTimeout(() => {
-        toast.remove();
-      }, 300);
+      setTimeout(() => toast.remove(), 300);
     }, 3000);
   }
 
@@ -341,6 +390,19 @@ class KeePassXCOTPCard extends HTMLElement {
         white-space: nowrap;
         overflow: hidden;
         text-overflow: ellipsis;
+      }
+      .otp-username {
+        font-weight: 500;
+        color: var(--primary-text-color);
+      }
+      .otp-url {
+        color: var(--primary-color);
+        text-decoration: none;
+        transition: color 0.2s ease;
+      }
+      .otp-url:hover {
+        color: var(--accent-color);
+        text-decoration: underline;
       }
       
       /* Toast Notification Styles */
