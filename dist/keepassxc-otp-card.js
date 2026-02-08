@@ -509,38 +509,47 @@ class KeePassXCOTPCard extends HTMLElement {
       // Try modern Clipboard API first (requires HTTPS or localhost)
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(token);
-        this.showCopiedState(button);
+        this.showCopiedState(button, entityId);
       } else {
         // Fallback for HTTP or older browsers
         this.copyToClipboardFallback(token);
-        this.showCopiedState(button);
+        this.showCopiedState(button, entityId);
       }
     } catch (err) {
       console.error('Copy failed, trying fallback:', err);
       try {
         this.copyToClipboardFallback(token);
-        this.showCopiedState(button);
+        this.showCopiedState(button, entityId);
       } catch (fallbackErr) {
         console.error('Fallback copy also failed:', fallbackErr);
-        this.showErrorState(button);
+        this.showErrorState(button, entityId);
       }
     }
   }
 
-  showCopiedState(button) {
+  /**
+   * Show the "Copied!" success state on the copy button
+   * @param {HTMLElement} button - The copy button element
+   * @param {string} entityId - The entity ID for stable timeout tracking across re-renders
+   * 
+   * Uses entityId instead of button reference as the timeout map key because:
+   * - entityId is stable across DOM updates/re-renders
+   * - Button references can become stale if DOM is modified
+   * - Prevents memory leaks from holding stale DOM references
+   */
+  showCopiedState(button, entityId) {
+    // Clear any existing timeout for this button
+    if (this._buttonTimeouts.has(entityId)) {
+      clearTimeout(this._buttonTimeouts.get(entityId));
+    }
+    
     // Change button to "Copied!" state
     const icon = button.querySelector('.copy-icon');
     const text = button.querySelector('.copy-text');
     
-    // Add null checks for safety
     if (!icon || !text) {
-      console.error('Button structure is invalid - missing icon or text elements');
+      console.warn('Button structure invalid for entity:', entityId);
       return;
-    }
-    
-    // Clear any existing timeout for this button to prevent race conditions
-    if (this._buttonTimeouts.has(button)) {
-      clearTimeout(this._buttonTimeouts.get(button));
     }
     
     // Save original content
@@ -557,26 +566,35 @@ class KeePassXCOTPCard extends HTMLElement {
       icon.textContent = originalIcon;
       text.textContent = originalText;
       button.classList.remove('copied');
-      this._buttonTimeouts.delete(button);
+      this._buttonTimeouts.delete(entityId);
     }, 3000);
     
-    this._buttonTimeouts.set(button, timeoutId);
+    this._buttonTimeouts.set(entityId, timeoutId);
   }
 
-  showErrorState(button) {
+  /**
+   * Show the "Error!" state on the copy button when copying fails
+   * @param {HTMLElement} button - The copy button element
+   * @param {string} entityId - The entity ID for stable timeout tracking across re-renders
+   * 
+   * Uses entityId instead of button reference as the timeout map key because:
+   * - entityId is stable across DOM updates/re-renders
+   * - Button references can become stale if DOM is modified
+   * - Prevents memory leaks from holding stale DOM references
+   */
+  showErrorState(button, entityId) {
+    // Clear any existing timeout for this button
+    if (this._buttonTimeouts.has(entityId)) {
+      clearTimeout(this._buttonTimeouts.get(entityId));
+    }
+    
     // Change button to "Error!" state
     const icon = button.querySelector('.copy-icon');
     const text = button.querySelector('.copy-text');
     
-    // Add null checks for safety
     if (!icon || !text) {
-      console.error('Button structure is invalid - missing icon or text elements');
+      console.warn('Button structure invalid for entity:', entityId);
       return;
-    }
-    
-    // Clear any existing timeout for this button to prevent race conditions
-    if (this._buttonTimeouts.has(button)) {
-      clearTimeout(this._buttonTimeouts.get(button));
     }
     
     // Save original content
@@ -593,10 +611,10 @@ class KeePassXCOTPCard extends HTMLElement {
       icon.textContent = originalIcon;
       text.textContent = originalText;
       button.classList.remove('error');
-      this._buttonTimeouts.delete(button);
+      this._buttonTimeouts.delete(entityId);
     }, 3000);
     
-    this._buttonTimeouts.set(button, timeoutId);
+    this._buttonTimeouts.set(entityId, timeoutId);
   }
 
   copyToClipboardFallback(text) {
@@ -827,7 +845,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c KEEPASSXC-OTP-CARD %c v1.0.0 ',
+  '%c KEEPASSXC-OTP-CARD %c v2.0.0 ',
   'color: white; background: #039be5; font-weight: 700;',
   'color: #039be5; background: white; font-weight: 700;'
 );
