@@ -1,0 +1,28 @@
+{
+  "name": "keepassxc-otp-card",
+  "version": "1.0.0",
+  "description": "Lovelace card for displaying KeePassXC OTP tokens in Home Assistant",
+  "main": "dist/keepassxc-otp-card.js",
+  "scripts": {
+    "build": "cp src/keepassxc-otp-card.js dist/keepassxc-otp-card.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/XtraLarge/keepassxc-otp-card.git"
+  },
+  "keywords": [
+    "home-assistant",
+    "lovelace",
+    "custom-card",
+    "keepassxc",
+    "otp",
+    "totp",
+    "2fa"
+  ],
+  "author": "XtraLarge",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/XtraLarge/keepassxc-otp-card/issues"
+  },
+  "homepage": "https://github.com/XtraLarge/keepassxc-otp-card#readme"
+}
