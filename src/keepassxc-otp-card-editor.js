@@ -13,7 +13,6 @@ class KeePassXCOTPCardEditor extends HTMLElement {
               type="text"
               id="title"
               class="value"
-              value="${this._config.title || '🔐 KeePassXC OTP'}"
             />
           </div>
           
@@ -45,7 +44,12 @@ class KeePassXCOTPCardEditor extends HTMLElement {
       `;
       this._initialized = true;
       
-      // Set checkbox state after rendering
+      // Set values after rendering to avoid XSS
+      const titleInput = this.querySelector('#title');
+      if (titleInput) {
+        titleInput.value = this._config.title || '🔐 KeePassXC OTP';
+      }
+      
       const showPersonCheckbox = this.querySelector('#show_person');
       if (showPersonCheckbox) {
         showPersonCheckbox.checked = this._config.show_person || false;
@@ -66,7 +70,11 @@ class KeePassXCOTPCardEditor extends HTMLElement {
     const showPersonCheckbox = this.querySelector('#show_person');
 
     titleInput.addEventListener('change', (e) => {
-      this._config.title = e.target.value;
+      const value = e.target.value.trim();
+      // If empty, use default title
+      this._config.title = value || '🔐 KeePassXC OTP';
+      // Update input to show the actual value being saved
+      e.target.value = this._config.title;
       this._fireConfigChanged();
     });
 
