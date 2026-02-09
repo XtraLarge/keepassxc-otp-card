@@ -528,13 +528,9 @@ class KeePassXCOTPCard extends HTMLElement {
       return token;
     }
     
-    const half = Math.floor(digits / 2);
-    if (token.length >= digits && digits > 0) {
-      return token.slice(0, half) + ' ' + token.slice(half);
-    }
-    
-    // Fallback: no formatting if token doesn't match expected digits
-    return token;
+    // Use actual token length for split position to handle any length correctly
+    const half = Math.floor(token.length / 2);
+    return token.slice(0, half) + ' ' + token.slice(half);
   }
 
   renderOTPEntry(entity) {

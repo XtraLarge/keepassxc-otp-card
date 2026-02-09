@@ -161,7 +161,7 @@ The card reads the following attributes from OTP sensor entities:
 | Attribute | Type | Required | Description | Default |
 |-----------|------|----------|-------------|---------|
 | `state` | string | ✅ Yes | Current OTP token | N/A |
-| `period` | number | ✅ Yes | Token refresh interval in seconds | 30 |
+| `period` | number | No | Token refresh interval in seconds | 30 |
 | `digits` | number | No | Number of digits in token (6 or 8) | Detected from token length |
 | `friendly_name` | string | No | Display name for the token | Entity ID |
 | `issuer` | string | No | Service/issuer name | - |
