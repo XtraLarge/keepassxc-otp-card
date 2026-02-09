@@ -288,17 +288,29 @@ class KeePassXCOTPCard extends HTMLElement {
       const tokenElement = this.content.querySelector(`.otp-token[data-entity-id="${entity.entity_id}"]`);
       if (tokenElement) {
         const token = entity.state;
-        const formattedToken = token.length === 6 
-          ? token.slice(0, 3) + ' ' + token.slice(3)
-          : token;
+        const digits = entity.attributes.digits || token.length;
+        const formattedToken = this.formatToken(token, digits);
         tokenElement.textContent = formattedToken;
       }
     });
   }
 
+  formatToken(token, digits) {
+    // Format token with space in the middle for readability
+    // Works for 6 digits (123 456), 8 digits (1234 5678), etc.
+    if (!token || token.length === 0) {
+      return token;
+    }
+    
+    // Use actual token length for split position to handle any length correctly
+    const half = Math.floor(token.length / 2);
+    return token.slice(0, half) + ' ' + token.slice(half);
+  }
+
   renderOTPEntry(entity) {
     const token = entity.state;
     const period = entity.attributes.period || 30;
+    const digits = entity.attributes.digits || token.length;
     const issuer = entity.attributes.issuer || '';
     const account = entity.attributes.account || '';
     const name = entity.attributes.friendly_name || entity.entity_id;
@@ -315,10 +327,8 @@ class KeePassXCOTPCard extends HTMLElement {
     if (percentage < 66) gaugeColor = '#ff9800'; // yellow/orange
     if (percentage < 33) gaugeColor = '#f44336'; // red
     
-    // Format token with space in middle (e.g., "123 456")
-    const formattedToken = token.length === 6 
-      ? token.slice(0, 3) + ' ' + token.slice(3)
-      : token;
+    // Format token with space in middle for readability
+    const formattedToken = this.formatToken(token, digits);
     
     // Build details line: Username • clickable URL
     let detailsHtml = '';
