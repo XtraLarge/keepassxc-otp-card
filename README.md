@@ -130,9 +130,22 @@ person_entity_id: person.alice
 
 1. **Auto-Discovery**: Card scans for entities starting with `sensor.keepassxc_otp_`
 2. **Filtering**: Optionally filters by `person_entity_id` attribute
-3. **Display**: Shows tokens with circular timer gauges
-4. **Copy**: Click token to copy to clipboard
-5. **Updates**: Refreshes automatically as token timers countdown
+3. **Client-Side Calculations**: 
+   - Reads `period` attribute (e.g., 30 seconds) from entity
+   - Reads `digits` attribute (e.g., 6 or 8 digits) for token formatting
+   - Calculates countdown and gauge progress locally in the browser
+   - No reliance on `time_remaining` from the integration (reduces Home Assistant load)
+4. **Display**: Shows tokens with circular timer gauges
+5. **Copy**: Click token to copy to clipboard
+6. **Updates**: Refreshes automatically as token timers countdown
+
+### Performance Benefits
+
+The card uses client-side calculations for all countdown timers and gauge visualizations:
+- **Reduced HA Load**: No constant `time_remaining` updates from the integration
+- **Smoother Animation**: Countdown calculated locally using `requestAnimationFrame`
+- **Synchronization**: All timers stay perfectly in sync with the `period` attribute
+- **Flexibility**: Supports any token period (15s, 30s, 60s, etc.) and digit count (6, 8, etc.)
 
 ---
 
@@ -140,6 +153,24 @@ person_entity_id: person.alice
 
 - [Home Assistant](https://www.home-assistant.io/) 2023.1 or newer
 - [KeePassXC OTP Integration](https://github.com/XtraLarge/keepassxc_otp)
+
+### Expected Entity Attributes
+
+The card reads the following attributes from OTP sensor entities:
+
+| Attribute | Type | Required | Description | Default |
+|-----------|------|----------|-------------|---------|
+| `state` | string | ✅ Yes | Current OTP token | N/A |
+| `period` | number | ✅ Yes | Token refresh interval in seconds | 30 |
+| `digits` | number | No | Number of digits in token (6 or 8) | Detected from token length |
+| `friendly_name` | string | No | Display name for the token | Entity ID |
+| `issuer` | string | No | Service/issuer name | - |
+| `account` | string | No | Account name | - |
+| `username` | string | No | Username associated with token | - |
+| `url` | string | No | Website URL (displays as clickable link) | - |
+| `person_entity_id` | string | No | Person entity for filtering | - |
+
+**Note**: The card does **not** use `time_remaining` attribute. All countdown calculations are performed client-side using the `period` attribute.
 
 ---
 
