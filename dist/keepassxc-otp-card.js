@@ -89,6 +89,19 @@ class KeePassXCOTPCardEditor extends HTMLElement {
               placeholder="media_player.phone"
             />
           </div>
+
+          <div class="option">
+            <label class="label">
+              <span>Notify Service (optional)</span>
+              <span class="secondary">Alternative without media_player, e.g. notify.mobile_app_pixel_8</span>
+            </label>
+            <input
+              type="text"
+              id="tts_notify_service"
+              class="value"
+              placeholder="notify.mobile_app_pixel_8"
+            />
+          </div>
         </div>
         <style>
           ${this.getStyles()}
@@ -128,6 +141,11 @@ class KeePassXCOTPCardEditor extends HTMLElement {
       if (ttsMediaPlayerInput) {
         ttsMediaPlayerInput.value = this._config.tts_media_player_entity_id || '';
       }
+
+      const ttsNotifyServiceInput = this.querySelector('#tts_notify_service');
+      if (ttsNotifyServiceInput) {
+        ttsNotifyServiceInput.value = this._config.tts_notify_service || '';
+      }
       
       this._setupListeners();
       
@@ -154,6 +172,7 @@ class KeePassXCOTPCardEditor extends HTMLElement {
     const useHaTtsCheckbox = this.querySelector('#use_home_assistant_tts_in_companion');
     const ttsEntityInput = this.querySelector('#tts_entity_id');
     const ttsMediaPlayerInput = this.querySelector('#tts_media_player_entity_id');
+    const ttsNotifyServiceInput = this.querySelector('#tts_notify_service');
 
     titleInput.addEventListener('change', (e) => {
       const value = e.target.value.trim();
@@ -210,6 +229,16 @@ class KeePassXCOTPCardEditor extends HTMLElement {
         this._config.tts_media_player_entity_id = value;
       } else {
         delete this._config.tts_media_player_entity_id;
+      }
+      this._fireConfigChanged();
+    });
+
+    ttsNotifyServiceInput.addEventListener('change', (e) => {
+      const value = e.target.value.trim();
+      if (value) {
+        this._config.tts_notify_service = value;
+      } else {
+        delete this._config.tts_notify_service;
       }
       this._fireConfigChanged();
     });
@@ -952,7 +981,10 @@ class KeePassXCOTPCard extends HTMLElement {
     if (this.config?.use_home_assistant_tts_in_companion !== true) {
       return false;
     }
-    return Boolean(this.config?.tts_entity_id && this.config?.tts_media_player_entity_id);
+    return Boolean(
+      this.config?.tts_notify_service ||
+      (this.config?.tts_entity_id && this.config?.tts_media_player_entity_id)
+    );
   }
 
   isCompanionApp() {
@@ -966,6 +998,19 @@ class KeePassXCOTPCard extends HTMLElement {
         return false;
       }
       const message = String(token).split('').join(' ');
+
+      if (this.config?.tts_notify_service) {
+        const [domain, service] = String(this.config.tts_notify_service).split('.');
+        if (!domain || !service) {
+          return false;
+        }
+        await this._hass.callService(domain, service, {
+          message: 'TTS',
+          data: { tts_text: message }
+        });
+        return true;
+      }
+
       await this._hass.callService('tts', 'speak', {
         entity_id: this.config.tts_entity_id,
         media_player_entity_id: this.config.tts_media_player_entity_id,

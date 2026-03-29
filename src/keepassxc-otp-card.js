@@ -612,7 +612,10 @@ class KeePassXCOTPCard extends HTMLElement {
     if (this.config?.use_home_assistant_tts_in_companion !== true) {
       return false;
     }
-    return Boolean(this.config?.tts_entity_id && this.config?.tts_media_player_entity_id);
+    return Boolean(
+      this.config?.tts_notify_service ||
+      (this.config?.tts_entity_id && this.config?.tts_media_player_entity_id)
+    );
   }
 
   isCompanionApp() {
@@ -626,6 +629,19 @@ class KeePassXCOTPCard extends HTMLElement {
         return false;
       }
       const message = String(token).split('').join(' ');
+
+      if (this.config?.tts_notify_service) {
+        const [domain, service] = String(this.config.tts_notify_service).split('.');
+        if (!domain || !service) {
+          return false;
+        }
+        await this._hass.callService(domain, service, {
+          message: 'TTS',
+          data: { tts_text: message }
+        });
+        return true;
+      }
+
       await this._hass.callService('tts', 'speak', {
         entity_id: this.config.tts_entity_id,
         media_player_entity_id: this.config.tts_media_player_entity_id,
