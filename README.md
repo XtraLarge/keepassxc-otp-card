@@ -50,6 +50,32 @@ A beautiful Lovelace card for displaying OTP tokens from the [KeePassXC OTP Inte
 
 ---
 
+## 🚀 Release Process (main only)
+
+This repository is configured for a single-branch flow using `main` only:
+
+1. Commit and merge changes to `main`
+2. Create a tag on `main`:
+   - `v2.0.2-beta.1` for beta/prerelease
+   - `v2.0.2` for stable/GA
+3. Push the tag
+4. GitHub Action builds `dist/keepassxc-otp-card.js` and publishes the release
+5. Release notes are generated automatically:
+   - `release.yml` creates notes from merged PRs (`generate_release_notes: true`)
+   - `release-drafter.yml` keeps a draft release text up to date in GitHub
+
+Notes:
+- Tags with `-` are published as prereleases automatically.
+- Release tags are validated to ensure they point to a commit on `main`.
+
+### Easiest GUI flow (no manual release text)
+
+1. Merge PR to `main`
+2. Go to **Releases** and open the generated **Draft release** (from Release Drafter), or just create/push a tag `v*`
+3. Publish — the release body is already prefilled/generated
+
+---
+
 ## 🎨 Configuration
 
 ### Visual Editor
@@ -218,8 +244,6 @@ Contributions are welcome!
 3. Make your changes
 4. Test thoroughly
 5. Submit a pull request
-
----
 
 ## 📄 License
 
