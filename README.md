@@ -35,6 +35,22 @@ A beautiful Lovelace card for displaying OTP tokens from the [KeePassXC OTP Inte
 9. Click "Install"
 10. Restart Home Assistant
 
+### Stable vs. Beta in HACS
+
+This repository supports both stable and beta versions via GitHub releases:
+
+- **Stable versions** use tags like `v2.1.0`
+- **Beta versions** use prerelease tags like `v2.2.0-beta.1` (or `-rc.1`)
+
+In HACS you can choose which channel to install:
+
+1. Open this card in HACS
+2. Open the menu for the repository
+3. Enable **Show beta versions** if you want prereleases
+4. Pick the desired version in **Redownload**
+
+> Tip: If you track the default branch URL directly, you may bypass release selection. For versioned installs, use normal HACS release handling and do not pin to a branch URL.
+
 ### Manual Installation
 
 1. Download `keepassxc-otp-card.js` from the [latest release](https://github.com/XtraLarge/keepassxc-otp-card/releases)
@@ -218,6 +234,21 @@ Contributions are welcome!
 3. Make your changes
 4. Test thoroughly
 5. Submit a pull request
+
+### Maintainer release flow
+
+Use a 3-step flow with `beta` + `main`:
+
+1. **Develop and test in `beta` branch**
+   - Open feature PRs with base branch `beta`
+   - CI workflow `.github/workflows/ci-beta.yml` validates each push/PR to `beta`
+2. **Merge tested changes from `beta` to `main`**
+3. **Publish from `main` (GitHub Releases UI)**
+   - Create and push a release tag from `main` (or create a new release with a new tag in GitHub UI), for example:
+     - `v2.2.0-beta.1` and mark as prerelease (**beta**)
+     - `v2.2.0` and mark as normal release (**stable/GA**)
+   - Workflow `.github/workflows/release.yml` runs on `v*` tags and only accepts tags that point to commits on `main`
+   - The workflow builds and uploads `dist/keepassxc-otp-card.js` to the published release
 
 ---
 
