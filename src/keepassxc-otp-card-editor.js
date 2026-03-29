@@ -55,7 +55,7 @@ class KeePassXCOTPCardEditor extends HTMLElement {
           <div class="option">
             <label class="label">
               <span>Use HA TTS in Companion</span>
-              <span class="secondary">Use Home Assistant tts.speak instead of browser speech in Companion app</span>
+              <span class="secondary">Use Home Assistant mobile_app notify TTS instead of browser speech in Companion app</span>
             </label>
             <input
               type="checkbox"

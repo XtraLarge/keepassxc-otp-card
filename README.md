@@ -152,7 +152,7 @@ type: custom:keepassxc-otp-card
 | `use_home_assistant_tts_in_companion` | boolean | `false` | In Companion app use `tts.speak` service instead of browser speech | ✅ Checkbox |
 | `tts_entity_id` | string | `null` | Home Assistant TTS entity (e.g. `tts.piper`) | ✅ Text input |
 
-When Companion-TTS is enabled, the card now auto-detects the current device targets (`notify.mobile_app_<device_id>` and matching `media_player.*`) instead of requiring manual target selection.
+When Companion-TTS is enabled, the card auto-detects the current device `notify.mobile_app_<device_id>` target and logs detection details in the browser console for debugging. If detection fails, it asks for the notify service once and stores it in browser local storage per user.
 
 ---
 

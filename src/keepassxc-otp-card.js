@@ -7,6 +7,7 @@ class KeePassXCOTPCard extends HTMLElement {
     this._lastUpdateTime = 0;  // Track last update timestamp
     this._speakTimeouts = new Map(); // Track delayed speak timers
     this._stableTokens = new Map(); // Keep token stable within one OTP time slice
+    this._notifyPromptShown = false;
   }
 
   setConfig(config) {
@@ -637,18 +638,7 @@ class KeePassXCOTPCard extends HTMLElement {
         }
       }
 
-      const mediaPlayerEntityId = this.getCompanionMediaPlayerEntityId();
-      if (!mediaPlayerEntityId) {
-        return false;
-      }
-
-      await this._hass.callService('tts', 'speak', {
-        entity_id: this.config.tts_entity_id,
-        media_player_entity_id: mediaPlayerEntityId,
-        message,
-        cache: false
-      });
-      return true;
+      return false;
     } catch (error) {
       console.error('KeePassXC OTP: Home Assistant TTS failed:', error);
       return false;
@@ -662,6 +652,13 @@ class KeePassXCOTPCard extends HTMLElement {
 
     if (this._cachedCompanionNotifyService) {
       return this._cachedCompanionNotifyService;
+    }
+
+    const storedService = this.getStoredNotifyService();
+    if (storedService) {
+      this._cachedCompanionNotifyService = storedService;
+      console.info('KeePassXC OTP: Using stored notify service override:', storedService);
+      return storedService;
     }
 
     const candidateId = window.externalApp?.deviceID
@@ -681,6 +678,13 @@ class KeePassXCOTPCard extends HTMLElement {
 
     const preferredCandidates = tokens.map((token) => `notify.mobile_app_${token}`);
     const discovered = await this.discoverMobileAppNotifyServices();
+    console.info('KeePassXC OTP: Companion notify detection candidates:', {
+      candidateId,
+      candidateName,
+      tokens,
+      preferredCandidates,
+      discovered
+    });
 
     const exactMatch = preferredCandidates.find((candidate) => discovered.includes(candidate));
     if (exactMatch) {
@@ -698,10 +702,33 @@ class KeePassXCOTPCard extends HTMLElement {
 
     if (discovered.length === 1) {
       this._cachedCompanionNotifyService = discovered[0];
+      console.info('KeePassXC OTP: Companion notify auto-selected single service:', discovered[0]);
       return discovered[0];
     }
 
-    return preferredCandidates[0] || null;
+    // Fallback: match current HA user to mobile_app device_tracker entities.
+    const userTrackerCandidates = this.getUserTrackerNotifyCandidates();
+    const trackerMatch = userTrackerCandidates.find((candidate) => discovered.includes(candidate));
+    if (trackerMatch) {
+      this._cachedCompanionNotifyService = trackerMatch;
+      console.info('KeePassXC OTP: Companion notify selected by user tracker match:', trackerMatch);
+      return trackerMatch;
+    }
+
+    const guessed = preferredCandidates[0] || null;
+    if (guessed) {
+      console.warn('KeePassXC OTP: Companion notify detection falling back to guessed service:', guessed);
+      return guessed;
+    }
+
+    const prompted = await this.promptForNotifyService(discovered);
+    if (prompted) {
+      this._cachedCompanionNotifyService = prompted;
+      this.storeNotifyService(prompted);
+      return prompted;
+    }
+
+    return null;
   }
 
   async discoverMobileAppNotifyServices() {
@@ -720,36 +747,70 @@ class KeePassXCOTPCard extends HTMLElement {
     }
   }
 
-  getCompanionMediaPlayerEntityId() {
-    if (!this.isCompanionApp()) {
+  getUserTrackerNotifyCandidates() {
+    if (!this._hass?.states) {
+      return [];
+    }
+    const currentUserId = this._hass?.user?.id || null;
+    const candidates = Object.entries(this._hass.states)
+      .filter(([entityId, state]) => entityId.startsWith('device_tracker.'))
+      .filter(([, state]) => !currentUserId || state.attributes?.user_id === currentUserId)
+      .sort(([, a], [, b]) => new Date(b.last_updated).getTime() - new Date(a.last_updated).getTime())
+      .map(([entityId]) => `notify.mobile_app_${entityId.replace('device_tracker.', '')}`);
+    return Array.from(new Set(candidates));
+  }
+
+  getStoredNotifyService() {
+    try {
+      const key = this.getNotifyServiceStorageKey();
+      const value = window.localStorage.getItem(key);
+      if (value && /^notify\.mobile_app_[a-z0-9_]+$/i.test(value)) {
+        return value;
+      }
+    } catch (error) {
+      console.warn('KeePassXC OTP: Failed to read stored notify service:', error);
+    }
+    return null;
+  }
+
+  storeNotifyService(serviceName) {
+    try {
+      const key = this.getNotifyServiceStorageKey();
+      window.localStorage.setItem(key, serviceName);
+    } catch (error) {
+      console.warn('KeePassXC OTP: Failed to store notify service:', error);
+    }
+  }
+
+  getNotifyServiceStorageKey() {
+    const userId = this._hass?.user?.id || 'default';
+    return `keepassxc_otp_notify_service_${userId}`;
+  }
+
+  async promptForNotifyService(discovered) {
+    if (this._notifyPromptShown) {
+      return null;
+    }
+    this._notifyPromptShown = true;
+
+    if (typeof window.prompt !== 'function') {
       return null;
     }
 
-    const candidateId = window.externalApp?.deviceID
-      || window.externalApp?.deviceId
-      || window.externalApp?.device_id
-      || null;
-    if (!candidateId) {
-      return null;
-    }
-
-    const slug = String(candidateId)
-      .toLowerCase()
-      .replace(/[^a-z0-9_]+/g, '_')
-      .replace(/^_+|_+$/g, '');
-    if (!slug || !this._hass?.states) {
-      return null;
-    }
-
-    const exact = `media_player.${slug}`;
-    if (this._hass.states[exact]) {
-      return exact;
-    }
-
-    const fallback = Object.keys(this._hass.states).find((entityId) =>
-      entityId.startsWith('media_player.') && entityId.includes(slug)
+    const defaultValue = discovered[0] || 'notify.mobile_app_';
+    const entered = window.prompt(
+      'KeePassXC OTP: Bitte notify Service eingeben (z.B. notify.mobile_app_s26ultra)',
+      defaultValue
     );
-    return fallback || null;
+    if (!entered) {
+      return null;
+    }
+    const normalized = entered.trim();
+    if (!/^notify\.mobile_app_[a-z0-9_]+$/i.test(normalized)) {
+      console.warn('KeePassXC OTP: Invalid notify service entered:', normalized);
+      return null;
+    }
+    return normalized;
   }
 
   speakTokenInBrowser(token) {
