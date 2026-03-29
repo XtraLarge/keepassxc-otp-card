@@ -569,6 +569,7 @@ class KeePassXCOTPCard extends HTMLElement {
         user-select: all;
         flex: 1;
         min-width: 0;
+        white-space: nowrap;
         /* No hover effect - token is not interactive */
       }
       .copy-button {
@@ -639,6 +640,15 @@ class KeePassXCOTPCard extends HTMLElement {
       .otp-url:hover {
         color: var(--accent-color);
         text-decoration: underline;
+      }
+      @media (max-width: 600px) {
+        .otp-token {
+          font-size: 28px;
+          letter-spacing: 2.5px;
+        }
+        .copy-button {
+          padding: 8px 12px;
+        }
       }
     `;
   }
