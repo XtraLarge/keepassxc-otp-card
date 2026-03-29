@@ -1088,7 +1088,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c KEEPASSXC-OTP-CARD %c v2.1.0-beta.2 ',
+  '%c KEEPASSXC-OTP-CARD %c v2.0.1-beta.1 ',
   'color: white; background: #039be5; font-weight: 700;',
   'color: #039be5; background: white; font-weight: 700;'
 );
