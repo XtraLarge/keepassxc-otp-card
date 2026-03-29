@@ -6,6 +6,7 @@ class KeePassXCOTPCard extends HTMLElement {
     this._animationFrameId = null;  // Track animation frame
     this._lastUpdateTime = 0;  // Track last update timestamp
     this._speakTimeouts = new Map(); // Track delayed speak timers
+    this._stableTokens = new Map(); // Keep token stable within one OTP time slice
   }
 
   setConfig(config) {
@@ -44,6 +45,7 @@ class KeePassXCOTPCard extends HTMLElement {
 
     this._speakTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
     this._speakTimeouts.clear();
+    this._stableTokens.clear();
   }
 
   startAnimationLoop() {
@@ -258,6 +260,14 @@ class KeePassXCOTPCard extends HTMLElement {
         return nameA.localeCompare(nameB);
       });
 
+    // Remove cached token entries for entities that no longer exist
+    const activeEntityIds = new Set(otpEntities.map(entity => entity.entity_id));
+    this._stableTokens.forEach((_, entityId) => {
+      if (!activeEntityIds.has(entityId)) {
+        this._stableTokens.delete(entityId);
+      }
+    });
+
     if (otpEntities.length === 0) {
       this.content.innerHTML = `
         <div class="empty">
@@ -324,12 +334,27 @@ class KeePassXCOTPCard extends HTMLElement {
     entities.forEach(entity => {
       const tokenElement = this.content.querySelector(`.otp-token[data-entity-id="${entity.entity_id}"]`);
       if (tokenElement) {
-        const token = entity.state;
+        const token = this.getStableTokenForEntity(entity);
         const digits = entity.attributes.digits || token.length;
         const formattedToken = this.formatToken(token, digits);
         tokenElement.textContent = formattedToken;
       }
     });
+  }
+
+  getStableTokenForEntity(entity) {
+    const entityId = entity.entity_id;
+    const token = String(entity.state || '');
+    const period = entity.attributes.period || 30;
+    const currentSlice = Math.floor(Date.now() / 1000 / period);
+    const existing = this._stableTokens.get(entityId);
+
+    if (!existing || existing.slice !== currentSlice) {
+      this._stableTokens.set(entityId, { slice: currentSlice, token });
+      return token;
+    }
+
+    return existing.token;
   }
 
   formatToken(token, digits) {
@@ -346,7 +371,7 @@ class KeePassXCOTPCard extends HTMLElement {
   }
 
   renderOTPEntry(entity) {
-    const token = entity.state;
+    const token = this.getStableTokenForEntity(entity);
     const period = entity.attributes.period || 30;
     const digits = entity.attributes.digits || token.length;
     const issuer = entity.attributes.issuer || '';
@@ -435,7 +460,7 @@ class KeePassXCOTPCard extends HTMLElement {
 
   async copyTokenWithButton(button, entityId) {
     const state = this._hass.states[entityId];
-    const token = state.state;
+    const token = state ? this.getStableTokenForEntity(state) : '';
     
     try {
       // Try modern Clipboard API first (requires HTTPS or localhost)
@@ -532,7 +557,7 @@ class KeePassXCOTPCard extends HTMLElement {
     const timeoutId = setTimeout(() => {
       this._speakTimeouts.delete(entityId);
       const currentState = this._hass.states[entityId];
-      const token = currentState ? currentState.state : null;
+      const token = currentState ? this.getStableTokenForEntity(currentState) : null;
 
       if (!token) {
         this.showSpeakErrorState(button);
