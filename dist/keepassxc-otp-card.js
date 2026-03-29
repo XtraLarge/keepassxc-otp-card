@@ -530,7 +530,8 @@ class KeePassXCOTPCard extends HTMLElement {
     
     // Use actual token length for split position to handle any length correctly
     const half = Math.floor(token.length / 2);
-    return token.slice(0, half) + ' ' + token.slice(half);
+    // Use non-breaking space to avoid line wrap between token groups on mobile
+    return token.slice(0, half) + '\u00A0' + token.slice(half);
   }
 
   renderOTPEntry(entity) {
@@ -795,6 +796,9 @@ class KeePassXCOTPCard extends HTMLElement {
         user-select: all;
         flex: 1;
         min-width: 0;
+        white-space: nowrap;
+        word-break: keep-all;
+        overflow-wrap: normal;
         /* No hover effect - token is not interactive */
       }
       .copy-button {
@@ -865,6 +869,22 @@ class KeePassXCOTPCard extends HTMLElement {
       .otp-url:hover {
         color: var(--accent-color);
         text-decoration: underline;
+      }
+      @media (max-width: 600px) {
+        .otp-token-row {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 8px;
+        }
+        .otp-token {
+          font-size: 28px;
+          letter-spacing: 2.5px;
+          width: 100%;
+        }
+        .copy-button {
+          padding: 8px 12px;
+          align-self: flex-start;
+        }
       }
     `;
   }
