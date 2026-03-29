@@ -304,7 +304,8 @@ class KeePassXCOTPCard extends HTMLElement {
     
     // Use actual token length for split position to handle any length correctly
     const half = Math.floor(token.length / 2);
-    return token.slice(0, half) + ' ' + token.slice(half);
+    // Use non-breaking space to avoid line wrap between token groups on mobile
+    return token.slice(0, half) + '\u00A0' + token.slice(half);
   }
 
   renderOTPEntry(entity) {
@@ -570,6 +571,8 @@ class KeePassXCOTPCard extends HTMLElement {
         flex: 1;
         min-width: 0;
         white-space: nowrap;
+        word-break: keep-all;
+        overflow-wrap: normal;
         /* No hover effect - token is not interactive */
       }
       .copy-button {
