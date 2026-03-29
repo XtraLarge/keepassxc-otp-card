@@ -1,0 +1,24 @@
+name: Draft release notes
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, closed, edited]
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  update_release_draft:
+    if: github.event_name == 'push' || github.event.pull_request.merged == true || github.event.action != 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update release draft
+        uses: release-drafter/release-drafter@v6
+        with:
+          config-name: release-drafter.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
