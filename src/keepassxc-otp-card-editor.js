@@ -37,6 +37,71 @@ class KeePassXCOTPCardEditor extends HTMLElement {
               class="value"
             />
           </div>
+
+          <div class="option">
+            <label class="label">
+              <span>Speak Delay (ms)</span>
+              <span class="secondary">Delay before reading token aloud</span>
+            </label>
+            <input
+              type="number"
+              id="speak_delay_ms"
+              class="value"
+              min="0"
+              step="500"
+            />
+          </div>
+
+          <div class="option">
+            <label class="label">
+              <span>Use HA TTS in Companion</span>
+              <span class="secondary">Use Home Assistant tts.speak instead of browser speech in Companion app</span>
+            </label>
+            <input
+              type="checkbox"
+              id="use_home_assistant_tts_in_companion"
+              class="value"
+            />
+          </div>
+
+          <div class="option">
+            <label class="label">
+              <span>TTS Entity ID</span>
+              <span class="secondary">Example: tts.piper</span>
+            </label>
+            <input
+              type="text"
+              id="tts_entity_id"
+              class="value"
+              placeholder="tts.piper"
+            />
+          </div>
+
+          <div class="option">
+            <label class="label">
+              <span>TTS Media Player</span>
+              <span class="secondary">Example: media_player.pixel_8</span>
+            </label>
+            <input
+              type="text"
+              id="tts_media_player_entity_id"
+              class="value"
+              placeholder="media_player.phone"
+            />
+          </div>
+
+          <div class="option">
+            <label class="label">
+              <span>Notify Service (optional)</span>
+              <span class="secondary">Alternative without media_player, e.g. notify.mobile_app_pixel_8 (leave empty for auto-detect in Companion)</span>
+            </label>
+            <input
+              type="text"
+              id="tts_notify_service"
+              class="value"
+              placeholder="notify.mobile_app_pixel_8"
+            />
+          </div>
         </div>
         <style>
           ${this.getStyles()}
@@ -53,6 +118,33 @@ class KeePassXCOTPCardEditor extends HTMLElement {
       const showPersonCheckbox = this.querySelector('#show_person');
       if (showPersonCheckbox) {
         showPersonCheckbox.checked = this._config.show_person === true;
+      }
+
+      const speakDelayInput = this.querySelector('#speak_delay_ms');
+      if (speakDelayInput) {
+        speakDelayInput.value = Number.isFinite(Number(this._config.speak_delay_ms))
+          ? String(Number(this._config.speak_delay_ms))
+          : '5000';
+      }
+
+      const useHaTtsCheckbox = this.querySelector('#use_home_assistant_tts_in_companion');
+      if (useHaTtsCheckbox) {
+        useHaTtsCheckbox.checked = this._config.use_home_assistant_tts_in_companion === true;
+      }
+
+      const ttsEntityInput = this.querySelector('#tts_entity_id');
+      if (ttsEntityInput) {
+        ttsEntityInput.value = this._config.tts_entity_id || '';
+      }
+
+      const ttsMediaPlayerInput = this.querySelector('#tts_media_player_entity_id');
+      if (ttsMediaPlayerInput) {
+        ttsMediaPlayerInput.value = this._config.tts_media_player_entity_id || '';
+      }
+
+      const ttsNotifyServiceInput = this.querySelector('#tts_notify_service');
+      if (ttsNotifyServiceInput) {
+        ttsNotifyServiceInput.value = this._config.tts_notify_service || '';
       }
       
       this._setupListeners();
@@ -76,6 +168,11 @@ class KeePassXCOTPCardEditor extends HTMLElement {
     const titleInput = this.querySelector('#title');
     const personSelect = this.querySelector('#person_entity_id');
     const showPersonCheckbox = this.querySelector('#show_person');
+    const speakDelayInput = this.querySelector('#speak_delay_ms');
+    const useHaTtsCheckbox = this.querySelector('#use_home_assistant_tts_in_companion');
+    const ttsEntityInput = this.querySelector('#tts_entity_id');
+    const ttsMediaPlayerInput = this.querySelector('#tts_media_player_entity_id');
+    const ttsNotifyServiceInput = this.querySelector('#tts_notify_service');
 
     titleInput.addEventListener('change', (e) => {
       const value = e.target.value.trim();
@@ -97,6 +194,52 @@ class KeePassXCOTPCardEditor extends HTMLElement {
 
     showPersonCheckbox.addEventListener('change', (e) => {
       this._config.show_person = e.target.checked;
+      this._fireConfigChanged();
+    });
+
+    speakDelayInput.addEventListener('change', (e) => {
+      const parsed = Number(e.target.value);
+      if (Number.isFinite(parsed) && parsed >= 0) {
+        this._config.speak_delay_ms = Math.round(parsed);
+      } else {
+        this._config.speak_delay_ms = 5000;
+      }
+      e.target.value = String(this._config.speak_delay_ms);
+      this._fireConfigChanged();
+    });
+
+    useHaTtsCheckbox.addEventListener('change', (e) => {
+      this._config.use_home_assistant_tts_in_companion = e.target.checked;
+      this._fireConfigChanged();
+    });
+
+    ttsEntityInput.addEventListener('change', (e) => {
+      const value = e.target.value.trim();
+      if (value) {
+        this._config.tts_entity_id = value;
+      } else {
+        delete this._config.tts_entity_id;
+      }
+      this._fireConfigChanged();
+    });
+
+    ttsMediaPlayerInput.addEventListener('change', (e) => {
+      const value = e.target.value.trim();
+      if (value) {
+        this._config.tts_media_player_entity_id = value;
+      } else {
+        delete this._config.tts_media_player_entity_id;
+      }
+      this._fireConfigChanged();
+    });
+
+    ttsNotifyServiceInput.addEventListener('change', (e) => {
+      const value = e.target.value.trim();
+      if (value) {
+        this._config.tts_notify_service = value;
+      } else {
+        delete this._config.tts_notify_service;
+      }
       this._fireConfigChanged();
     });
   }
