@@ -871,12 +871,19 @@ class KeePassXCOTPCard extends HTMLElement {
         text-decoration: underline;
       }
       @media (max-width: 600px) {
+        .otp-token-row {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 8px;
+        }
         .otp-token {
           font-size: 28px;
           letter-spacing: 2.5px;
+          width: 100%;
         }
         .copy-button {
           padding: 8px 12px;
+          align-self: flex-start;
         }
       }
     `;
