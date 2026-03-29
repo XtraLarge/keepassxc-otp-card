@@ -66,6 +66,23 @@ In HACS you can choose which channel to install:
 
 ---
 
+## 🚀 Release Process (main only)
+
+This repository is configured for a single-branch flow using `main` only:
+
+1. Commit and merge changes to `main`
+2. Create a tag on `main`:
+   - `v2.0.2-beta.1` for beta/prerelease
+   - `v2.0.2` for stable/GA
+3. Push the tag
+4. GitHub Action builds `dist/keepassxc-otp-card.js` and publishes the release
+
+Notes:
+- Tags with `-` are published as prereleases automatically.
+- Release tags are validated to ensure they point to a commit on `main`.
+
+---
+
 ## 🎨 Configuration
 
 ### Visual Editor
@@ -234,14 +251,6 @@ Contributions are welcome!
 3. Make your changes
 4. Test thoroughly
 5. Submit a pull request
-
-### Maintainer release flow
-
-- Push a tag starting with `v` to create a release automatically (workflow: `.github/workflows/release.yml`)
-- Tags containing `-` (for example `v2.2.0-beta.1`) are published as **prerelease/beta**
-- Tags without `-` (for example `v2.1.0`) are published as **stable**
-
----
 
 ## 📄 License
 
