@@ -1051,13 +1051,6 @@ class KeePassXCOTPCard extends HTMLElement {
           padding: 8px 12px;
           align-self: flex-start;
         }
-        .otp-actions {
-          width: 100%;
-        }
-        .speak-button {
-          padding: 8px 12px;
-          align-self: flex-start;
-        }
       }
     `;
   }
