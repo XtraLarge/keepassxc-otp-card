@@ -93,7 +93,7 @@ class KeePassXCOTPCardEditor extends HTMLElement {
           <div class="option">
             <label class="label">
               <span>Notify Service (optional)</span>
-              <span class="secondary">Alternative without media_player, e.g. notify.mobile_app_pixel_8</span>
+              <span class="secondary">Alternative without media_player, e.g. notify.mobile_app_pixel_8 (leave empty for auto-detect in Companion)</span>
             </label>
             <input
               type="text"

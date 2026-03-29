@@ -93,7 +93,7 @@ class KeePassXCOTPCardEditor extends HTMLElement {
           <div class="option">
             <label class="label">
               <span>Notify Service (optional)</span>
-              <span class="secondary">Alternative without media_player, e.g. notify.mobile_app_pixel_8</span>
+              <span class="secondary">Alternative without media_player, e.g. notify.mobile_app_pixel_8 (leave empty for auto-detect in Companion)</span>
             </label>
             <input
               type="text"
@@ -982,7 +982,7 @@ class KeePassXCOTPCard extends HTMLElement {
       return false;
     }
     return Boolean(
-      this.config?.tts_notify_service ||
+      this.getCompanionNotifyService() ||
       (this.config?.tts_entity_id && this.config?.tts_media_player_entity_id)
     );
   }
@@ -999,8 +999,9 @@ class KeePassXCOTPCard extends HTMLElement {
       }
       const message = String(token).split('').join(' ');
 
-      if (this.config?.tts_notify_service) {
-        const [domain, service] = String(this.config.tts_notify_service).split('.');
+      const notifyServiceName = this.getCompanionNotifyService();
+      if (notifyServiceName) {
+        const [domain, service] = String(notifyServiceName).split('.');
         if (!domain || !service) {
           return false;
         }
@@ -1022,6 +1023,36 @@ class KeePassXCOTPCard extends HTMLElement {
       console.error('KeePassXC OTP: Home Assistant TTS failed:', error);
       return false;
     }
+  }
+
+  getCompanionNotifyService() {
+    if (this.config?.tts_notify_service) {
+      return this.config.tts_notify_service;
+    }
+    if (!this.isCompanionApp()) {
+      return null;
+    }
+
+    // Try to infer device id from Companion app bridge.
+    const candidateId = window.externalApp?.deviceID
+      || window.externalApp?.deviceId
+      || window.externalApp?.device_id
+      || null;
+
+    if (!candidateId) {
+      return null;
+    }
+
+    const slug = String(candidateId)
+      .toLowerCase()
+      .replace(/[^a-z0-9_]+/g, '_')
+      .replace(/^_+|_+$/g, '');
+
+    if (!slug) {
+      return null;
+    }
+
+    return `notify.mobile_app_${slug}`;
   }
 
   speakTokenInBrowser(token) {
