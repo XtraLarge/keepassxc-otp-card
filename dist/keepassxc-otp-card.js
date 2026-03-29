@@ -776,9 +776,11 @@ class KeePassXCOTPCard extends HTMLElement {
       this._speakTimeouts.delete(entityId);
     }
 
+    const delayMs = this.getSpeakDelayMs();
+
     button.dataset.state = 'pending';
     button.dataset.stateAt = Date.now().toString();
-    button.dataset.speakAt = (Date.now() + 5000).toString();
+    button.dataset.speakAt = (Date.now() + delayMs).toString();
 
     const timeoutId = setTimeout(() => {
       this._speakTimeouts.delete(entityId);
@@ -790,34 +792,68 @@ class KeePassXCOTPCard extends HTMLElement {
         return;
       }
 
-      const spoken = this.speakToken(token);
-      if (spoken) {
-        this.showSpokenState(button);
-      } else {
+      this.speakToken(token).then((spoken) => {
+        if (spoken) {
+          this.showSpokenState(button);
+        } else {
+          this.showSpeakErrorState(button);
+        }
+      }).catch((error) => {
+        console.error('KeePassXC OTP: Speech synthesis failed:', error);
         this.showSpeakErrorState(button);
-      }
-    }, 5000);
+      });
+    }, delayMs);
 
     this._speakTimeouts.set(entityId, timeoutId);
   }
 
+  getSpeakDelayMs() {
+    // Some mobile webviews can reject speech synthesis calls if there is a
+    // long delay after the user click. In Home Assistant Companion we speak
+    // immediately so it still counts as user-initiated.
+    const userAgent = navigator.userAgent || '';
+    const isCompanionApp = /Home\s?Assistant/i.test(userAgent);
+    return isCompanionApp ? 0 : 5000;
+  }
+
   speakToken(token) {
     if (!window.speechSynthesis || typeof SpeechSynthesisUtterance === 'undefined') {
-      return false;
+      return Promise.resolve(false);
     }
 
-    try {
-      const speakableToken = String(token).split('').join(' ');
-      const utterance = new SpeechSynthesisUtterance(speakableToken);
-      utterance.lang = this._hass?.language || navigator.language || 'en-US';
-      utterance.rate = 0.9;
-      window.speechSynthesis.cancel();
-      window.speechSynthesis.speak(utterance);
-      return true;
-    } catch (error) {
-      console.error('KeePassXC OTP: Speech synthesis failed:', error);
-      return false;
-    }
+    return new Promise((resolve) => {
+      try {
+        const speakableToken = String(token).split('').join(' ');
+        const utterance = new SpeechSynthesisUtterance(speakableToken);
+        let resolved = false;
+        let fallbackTimeout = null;
+
+        const finish = (result) => {
+          if (resolved) {
+            return;
+          }
+          resolved = true;
+          if (fallbackTimeout) {
+            clearTimeout(fallbackTimeout);
+          }
+          resolve(result);
+        };
+
+        utterance.lang = this._hass?.language || navigator.language || 'en-US';
+        utterance.rate = 0.9;
+        utterance.onstart = () => finish(true);
+        utterance.onerror = () => finish(false);
+
+        // Some WebViews do not fire events reliably.
+        fallbackTimeout = setTimeout(() => finish(false), 2500);
+
+        window.speechSynthesis.cancel();
+        window.speechSynthesis.speak(utterance);
+      } catch (error) {
+        console.error('KeePassXC OTP: Speech synthesis failed:', error);
+        resolve(false);
+      }
+    });
   }
 
   showSpokenState(button) {
