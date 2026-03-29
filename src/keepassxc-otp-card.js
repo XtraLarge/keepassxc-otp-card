@@ -599,6 +599,47 @@ class KeePassXCOTPCard extends HTMLElement {
   }
 
   speakToken(token) {
+    if (this.shouldUseHomeAssistantTts()) {
+      return this.speakTokenViaHomeAssistant(token);
+    }
+    return this.speakTokenInBrowser(token);
+  }
+
+  shouldUseHomeAssistantTts() {
+    if (!this.isCompanionApp()) {
+      return false;
+    }
+    if (this.config?.use_home_assistant_tts_in_companion !== true) {
+      return false;
+    }
+    return Boolean(this.config?.tts_entity_id && this.config?.tts_media_player_entity_id);
+  }
+
+  isCompanionApp() {
+    const userAgent = navigator.userAgent || '';
+    return /Home\s?Assistant/i.test(userAgent);
+  }
+
+  async speakTokenViaHomeAssistant(token) {
+    try {
+      if (!this._hass?.callService) {
+        return false;
+      }
+      const message = String(token).split('').join(' ');
+      await this._hass.callService('tts', 'speak', {
+        entity_id: this.config.tts_entity_id,
+        media_player_entity_id: this.config.tts_media_player_entity_id,
+        message,
+        cache: false
+      });
+      return true;
+    } catch (error) {
+      console.error('KeePassXC OTP: Home Assistant TTS failed:', error);
+      return false;
+    }
+  }
+
+  speakTokenInBrowser(token) {
     if (!window.speechSynthesis || typeof SpeechSynthesisUtterance === 'undefined') {
       return Promise.resolve(false);
     }
