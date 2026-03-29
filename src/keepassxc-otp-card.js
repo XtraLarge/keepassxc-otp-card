@@ -556,7 +556,7 @@ class KeePassXCOTPCard extends HTMLElement {
     button.dataset.stateAt = Date.now().toString();
     button.dataset.speakAt = (Date.now() + delayMs).toString();
 
-    const timeoutId = setTimeout(() => {
+    const runSpeak = () => {
       this._speakTimeouts.delete(entityId);
       const currentState = this._hass.states[entityId];
       const token = currentState ? this.getStableTokenForEntity(currentState) : null;
@@ -576,18 +576,26 @@ class KeePassXCOTPCard extends HTMLElement {
         console.error('KeePassXC OTP: Speech synthesis failed:', error);
         this.showSpeakErrorState(button);
       });
-    }, delayMs);
+    };
 
+    // Keep speech in the direct click call stack when delay is 0.
+    // Android Home Assistant Companion WebView may reject speech calls
+    // that happen asynchronously even with a zero-delay timeout.
+    if (delayMs <= 0) {
+      runSpeak();
+      return;
+    }
+
+    const timeoutId = setTimeout(runSpeak, delayMs);
     this._speakTimeouts.set(entityId, timeoutId);
   }
 
   getSpeakDelayMs() {
-    // Some mobile webviews can reject speech synthesis calls if there is a
-    // long delay after the user click. In Home Assistant Companion we speak
-    // immediately so it still counts as user-initiated.
-    const userAgent = navigator.userAgent || '';
-    const isCompanionApp = /Home\s?Assistant/i.test(userAgent);
-    return isCompanionApp ? 0 : 5000;
+    const configuredDelay = Number(this.config?.speak_delay_ms);
+    if (Number.isFinite(configuredDelay) && configuredDelay >= 0) {
+      return configuredDelay;
+    }
+    return 5000;
   }
 
   speakToken(token) {

@@ -37,6 +37,20 @@ class KeePassXCOTPCardEditor extends HTMLElement {
               class="value"
             />
           </div>
+
+          <div class="option">
+            <label class="label">
+              <span>Speak Delay (ms)</span>
+              <span class="secondary">Delay before reading token aloud</span>
+            </label>
+            <input
+              type="number"
+              id="speak_delay_ms"
+              class="value"
+              min="0"
+              step="500"
+            />
+          </div>
         </div>
         <style>
           ${this.getStyles()}
@@ -53,6 +67,13 @@ class KeePassXCOTPCardEditor extends HTMLElement {
       const showPersonCheckbox = this.querySelector('#show_person');
       if (showPersonCheckbox) {
         showPersonCheckbox.checked = this._config.show_person === true;
+      }
+
+      const speakDelayInput = this.querySelector('#speak_delay_ms');
+      if (speakDelayInput) {
+        speakDelayInput.value = Number.isFinite(Number(this._config.speak_delay_ms))
+          ? String(Number(this._config.speak_delay_ms))
+          : '5000';
       }
       
       this._setupListeners();
@@ -76,6 +97,7 @@ class KeePassXCOTPCardEditor extends HTMLElement {
     const titleInput = this.querySelector('#title');
     const personSelect = this.querySelector('#person_entity_id');
     const showPersonCheckbox = this.querySelector('#show_person');
+    const speakDelayInput = this.querySelector('#speak_delay_ms');
 
     titleInput.addEventListener('change', (e) => {
       const value = e.target.value.trim();
@@ -97,6 +119,17 @@ class KeePassXCOTPCardEditor extends HTMLElement {
 
     showPersonCheckbox.addEventListener('change', (e) => {
       this._config.show_person = e.target.checked;
+      this._fireConfigChanged();
+    });
+
+    speakDelayInput.addEventListener('change', (e) => {
+      const parsed = Number(e.target.value);
+      if (Number.isFinite(parsed) && parsed >= 0) {
+        this._config.speak_delay_ms = Math.round(parsed);
+      } else {
+        this._config.speak_delay_ms = 5000;
+      }
+      e.target.value = String(this._config.speak_delay_ms);
       this._fireConfigChanged();
     });
   }
