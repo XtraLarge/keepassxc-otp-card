@@ -321,6 +321,7 @@ class KeePassXCOTPCard extends HTMLElement {
     this._lastUpdateTime = 0;  // Track last update timestamp
     this._speakTimeouts = new Map(); // Track delayed speak timers
     this._stableTokens = new Map(); // Keep token stable within one OTP time slice
+    this._notifyPromptShown = false;
   }
 
   setConfig(config) {
