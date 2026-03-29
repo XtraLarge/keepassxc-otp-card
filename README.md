@@ -244,10 +244,10 @@ Use a 3-step flow with `beta` + `main`:
    - CI workflow `.github/workflows/ci-beta.yml` validates each push/PR to `beta`
 2. **Merge tested changes from `beta` to `main`**
 3. **Publish from `main` (GitHub Releases UI)**
-   - Create a release tag from `main`, for example:
+   - Create and push a release tag from `main` (or create a new release with a new tag in GitHub UI), for example:
      - `v2.2.0-beta.1` and mark as prerelease (**beta**)
      - `v2.2.0` and mark as normal release (**stable/GA**)
-   - Workflow `.github/workflows/release.yml` only accepts tags that point to commits on `main`
+   - Workflow `.github/workflows/release.yml` runs on `v*` tags and only accepts tags that point to commits on `main`
    - The workflow builds and uploads `dist/keepassxc-otp-card.js` to the published release
 
 ---
