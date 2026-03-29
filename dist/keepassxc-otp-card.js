@@ -37,6 +37,46 @@ class KeePassXCOTPCardEditor extends HTMLElement {
               class="value"
             />
           </div>
+
+          <div class="option">
+            <label class="label">
+              <span>Speak Delay (ms)</span>
+              <span class="secondary">Delay before reading token aloud</span>
+            </label>
+            <input
+              type="number"
+              id="speak_delay_ms"
+              class="value"
+              min="0"
+              step="500"
+            />
+          </div>
+
+          <div class="option">
+            <label class="label">
+              <span>Use HA TTS in Companion</span>
+              <span class="secondary">Use Home Assistant mobile_app notify TTS instead of browser speech in Companion app</span>
+            </label>
+            <input
+              type="checkbox"
+              id="use_home_assistant_tts_in_companion"
+              class="value"
+            />
+          </div>
+
+          <div class="option">
+            <label class="label">
+              <span>TTS Entity ID</span>
+              <span class="secondary">Example: tts.piper</span>
+            </label>
+            <input
+              type="text"
+              id="tts_entity_id"
+              class="value"
+              placeholder="tts.piper"
+            />
+          </div>
+
         </div>
         <style>
           ${this.getStyles()}
@@ -54,7 +94,24 @@ class KeePassXCOTPCardEditor extends HTMLElement {
       if (showPersonCheckbox) {
         showPersonCheckbox.checked = this._config.show_person === true;
       }
-      
+
+      const speakDelayInput = this.querySelector('#speak_delay_ms');
+      if (speakDelayInput) {
+        speakDelayInput.value = Number.isFinite(Number(this._config.speak_delay_ms))
+          ? String(Number(this._config.speak_delay_ms))
+          : '5000';
+      }
+
+      const useHaTtsCheckbox = this.querySelector('#use_home_assistant_tts_in_companion');
+      if (useHaTtsCheckbox) {
+        useHaTtsCheckbox.checked = this._config.use_home_assistant_tts_in_companion === true;
+      }
+
+      const ttsEntityInput = this.querySelector('#tts_entity_id');
+      if (ttsEntityInput) {
+        ttsEntityInput.value = this._config.tts_entity_id || '';
+      }
+
       this._setupListeners();
       
       // Populate person selector if hass is already available
@@ -76,6 +133,10 @@ class KeePassXCOTPCardEditor extends HTMLElement {
     const titleInput = this.querySelector('#title');
     const personSelect = this.querySelector('#person_entity_id');
     const showPersonCheckbox = this.querySelector('#show_person');
+    const speakDelayInput = this.querySelector('#speak_delay_ms');
+    const useHaTtsCheckbox = this.querySelector('#use_home_assistant_tts_in_companion');
+    const ttsEntityInput = this.querySelector('#tts_entity_id');
+    
 
     titleInput.addEventListener('change', (e) => {
       const value = e.target.value.trim();
@@ -99,6 +160,33 @@ class KeePassXCOTPCardEditor extends HTMLElement {
       this._config.show_person = e.target.checked;
       this._fireConfigChanged();
     });
+
+    speakDelayInput.addEventListener('change', (e) => {
+      const parsed = Number(e.target.value);
+      if (Number.isFinite(parsed) && parsed >= 0) {
+        this._config.speak_delay_ms = Math.round(parsed);
+      } else {
+        this._config.speak_delay_ms = 5000;
+      }
+      e.target.value = String(this._config.speak_delay_ms);
+      this._fireConfigChanged();
+    });
+
+    useHaTtsCheckbox.addEventListener('change', (e) => {
+      this._config.use_home_assistant_tts_in_companion = e.target.checked;
+      this._fireConfigChanged();
+    });
+
+    ttsEntityInput.addEventListener('change', (e) => {
+      const value = e.target.value.trim();
+      if (value) {
+        this._config.tts_entity_id = value;
+      } else {
+        delete this._config.tts_entity_id;
+      }
+      this._fireConfigChanged();
+    });
+
   }
 
   _populatePersonSelector() {
@@ -233,6 +321,7 @@ class KeePassXCOTPCard extends HTMLElement {
     this._lastUpdateTime = 0;  // Track last update timestamp
     this._speakTimeouts = new Map(); // Track delayed speak timers
     this._stableTokens = new Map(); // Keep token stable within one OTP time slice
+    this._notifyPromptShown = false;
   }
 
   setConfig(config) {
@@ -782,7 +871,7 @@ class KeePassXCOTPCard extends HTMLElement {
     button.dataset.stateAt = Date.now().toString();
     button.dataset.speakAt = (Date.now() + delayMs).toString();
 
-    const timeoutId = setTimeout(() => {
+    const runSpeak = () => {
       this._speakTimeouts.delete(entityId);
       const currentState = this._hass.states[entityId];
       const token = currentState ? this.getStableTokenForEntity(currentState) : null;
@@ -802,21 +891,243 @@ class KeePassXCOTPCard extends HTMLElement {
         console.error('KeePassXC OTP: Speech synthesis failed:', error);
         this.showSpeakErrorState(button);
       });
-    }, delayMs);
+    };
 
+    // Keep speech in the direct click call stack when delay is 0.
+    // Android Home Assistant Companion WebView may reject speech calls
+    // that happen asynchronously even with a zero-delay timeout.
+    if (delayMs <= 0) {
+      runSpeak();
+      return;
+    }
+
+    const timeoutId = setTimeout(runSpeak, delayMs);
     this._speakTimeouts.set(entityId, timeoutId);
   }
 
   getSpeakDelayMs() {
-    // Some mobile webviews can reject speech synthesis calls if there is a
-    // long delay after the user click. In Home Assistant Companion we speak
-    // immediately so it still counts as user-initiated.
-    const userAgent = navigator.userAgent || '';
-    const isCompanionApp = /Home\s?Assistant/i.test(userAgent);
-    return isCompanionApp ? 0 : 5000;
+    const configuredDelay = Number(this.config?.speak_delay_ms);
+    if (Number.isFinite(configuredDelay) && configuredDelay >= 0) {
+      return configuredDelay;
+    }
+    return 5000;
   }
 
   speakToken(token) {
+    if (this.shouldUseHomeAssistantTts()) {
+      return this.speakTokenViaHomeAssistant(token);
+    }
+    return this.speakTokenInBrowser(token);
+  }
+
+  shouldUseHomeAssistantTts() {
+    return this.isCompanionApp() && this.config?.use_home_assistant_tts_in_companion === true;
+  }
+
+  isCompanionApp() {
+    const userAgent = navigator.userAgent || '';
+    return /Home\s?Assistant/i.test(userAgent);
+  }
+
+  async speakTokenViaHomeAssistant(token) {
+    try {
+      if (!this._hass?.callService) {
+        return false;
+      }
+      const message = String(token).split('').join(' ');
+
+      const notifyServiceName = await this.getCompanionNotifyService();
+      if (notifyServiceName) {
+        try {
+          const [domain, service] = String(notifyServiceName).split('.');
+          if (domain && service) {
+            await this._hass.callService(domain, service, {
+              message: 'TTS',
+              data: { tts_text: message }
+            });
+            return true;
+          }
+        } catch (notifyError) {
+          console.warn('KeePassXC OTP: Notify service failed, falling back to tts.speak:', notifyError);
+        }
+      }
+
+      return false;
+    } catch (error) {
+      console.error('KeePassXC OTP: Home Assistant TTS failed:', error);
+      return false;
+    }
+  }
+
+  async getCompanionNotifyService() {
+    if (!this.isCompanionApp()) {
+      return null;
+    }
+
+    if (this._cachedCompanionNotifyService) {
+      return this._cachedCompanionNotifyService;
+    }
+
+    const storedService = this.getStoredNotifyService();
+    if (storedService) {
+      this._cachedCompanionNotifyService = storedService;
+      console.info('KeePassXC OTP: Using stored notify service override:', storedService);
+      return storedService;
+    }
+
+    const candidateId = window.externalApp?.deviceID
+      || window.externalApp?.deviceId
+      || window.externalApp?.device_id
+      || null;
+    const candidateName = window.externalApp?.deviceName
+      || window.externalApp?.device_name
+      || null;
+    const tokens = [candidateId, candidateName]
+      .filter(Boolean)
+      .map((value) => String(value)
+        .toLowerCase()
+        .replace(/[^a-z0-9_]+/g, '_')
+        .replace(/^_+|_+$/g, ''))
+      .filter(Boolean);
+
+    const preferredCandidates = tokens.map((token) => `notify.mobile_app_${token}`);
+    const discovered = await this.discoverMobileAppNotifyServices();
+    console.info('KeePassXC OTP: Companion notify detection candidates:', {
+      candidateId,
+      candidateName,
+      tokens,
+      preferredCandidates,
+      discovered
+    });
+
+    const exactMatch = preferredCandidates.find((candidate) => discovered.includes(candidate));
+    if (exactMatch) {
+      this._cachedCompanionNotifyService = exactMatch;
+      return exactMatch;
+    }
+
+    const fuzzyMatch = discovered.find((serviceName) =>
+      tokens.some((token) => serviceName.includes(token))
+    );
+    if (fuzzyMatch) {
+      this._cachedCompanionNotifyService = fuzzyMatch;
+      return fuzzyMatch;
+    }
+
+    if (discovered.length === 1) {
+      this._cachedCompanionNotifyService = discovered[0];
+      console.info('KeePassXC OTP: Companion notify auto-selected single service:', discovered[0]);
+      return discovered[0];
+    }
+
+    // Fallback: match current HA user to mobile_app device_tracker entities.
+    const userTrackerCandidates = this.getUserTrackerNotifyCandidates();
+    const trackerMatch = userTrackerCandidates.find((candidate) => discovered.includes(candidate));
+    if (trackerMatch) {
+      this._cachedCompanionNotifyService = trackerMatch;
+      console.info('KeePassXC OTP: Companion notify selected by user tracker match:', trackerMatch);
+      return trackerMatch;
+    }
+
+    const guessed = preferredCandidates[0] || null;
+    if (guessed) {
+      console.warn('KeePassXC OTP: Companion notify detection falling back to guessed service:', guessed);
+      return guessed;
+    }
+
+    const prompted = await this.promptForNotifyService(discovered);
+    if (prompted) {
+      this._cachedCompanionNotifyService = prompted;
+      this.storeNotifyService(prompted);
+      return prompted;
+    }
+
+    return null;
+  }
+
+  async discoverMobileAppNotifyServices() {
+    try {
+      if (!this._hass?.callWS) {
+        return [];
+      }
+      const services = await this._hass.callWS({ type: 'get_services' });
+      const notifyServices = services?.notify ? Object.keys(services.notify) : [];
+      return notifyServices
+        .filter((serviceName) => serviceName.startsWith('mobile_app_'))
+        .map((serviceName) => `notify.${serviceName}`);
+    } catch (error) {
+      console.warn('KeePassXC OTP: Could not discover notify services:', error);
+      return [];
+    }
+  }
+
+  getUserTrackerNotifyCandidates() {
+    if (!this._hass?.states) {
+      return [];
+    }
+    const currentUserId = this._hass?.user?.id || null;
+    const candidates = Object.entries(this._hass.states)
+      .filter(([entityId, state]) => entityId.startsWith('device_tracker.'))
+      .filter(([, state]) => !currentUserId || state.attributes?.user_id === currentUserId)
+      .sort(([, a], [, b]) => new Date(b.last_updated).getTime() - new Date(a.last_updated).getTime())
+      .map(([entityId]) => `notify.mobile_app_${entityId.replace('device_tracker.', '')}`);
+    return Array.from(new Set(candidates));
+  }
+
+  getStoredNotifyService() {
+    try {
+      const key = this.getNotifyServiceStorageKey();
+      const value = window.localStorage.getItem(key);
+      if (value && /^notify\.mobile_app_[a-z0-9_]+$/i.test(value)) {
+        return value;
+      }
+    } catch (error) {
+      console.warn('KeePassXC OTP: Failed to read stored notify service:', error);
+    }
+    return null;
+  }
+
+  storeNotifyService(serviceName) {
+    try {
+      const key = this.getNotifyServiceStorageKey();
+      window.localStorage.setItem(key, serviceName);
+    } catch (error) {
+      console.warn('KeePassXC OTP: Failed to store notify service:', error);
+    }
+  }
+
+  getNotifyServiceStorageKey() {
+    const userId = this._hass?.user?.id || 'default';
+    return `keepassxc_otp_notify_service_${userId}`;
+  }
+
+  async promptForNotifyService(discovered) {
+    if (this._notifyPromptShown) {
+      return null;
+    }
+    this._notifyPromptShown = true;
+
+    if (typeof window.prompt !== 'function') {
+      return null;
+    }
+
+    const defaultValue = discovered[0] || 'notify.mobile_app_';
+    const entered = window.prompt(
+      'KeePassXC OTP: Bitte notify Service eingeben (z.B. notify.mobile_app_s26ultra)',
+      defaultValue
+    );
+    if (!entered) {
+      return null;
+    }
+    const normalized = entered.trim();
+    if (!/^notify\.mobile_app_[a-z0-9_]+$/i.test(normalized)) {
+      console.warn('KeePassXC OTP: Invalid notify service entered:', normalized);
+      return null;
+    }
+    return normalized;
+  }
+
+  speakTokenInBrowser(token) {
     if (!window.speechSynthesis || typeof SpeechSynthesisUtterance === 'undefined') {
       return Promise.resolve(false);
     }
@@ -826,6 +1137,7 @@ class KeePassXCOTPCard extends HTMLElement {
         const speakableToken = String(token).split('').join(' ');
         const utterance = new SpeechSynthesisUtterance(speakableToken);
         let resolved = false;
+        let optimisticTimeout = null;
         let fallbackTimeout = null;
 
         const finish = (result) => {
@@ -833,9 +1145,8 @@ class KeePassXCOTPCard extends HTMLElement {
             return;
           }
           resolved = true;
-          if (fallbackTimeout) {
-            clearTimeout(fallbackTimeout);
-          }
+          if (optimisticTimeout) clearTimeout(optimisticTimeout);
+          if (fallbackTimeout) clearTimeout(fallbackTimeout);
           resolve(result);
         };
 
@@ -844,8 +1155,15 @@ class KeePassXCOTPCard extends HTMLElement {
         utterance.onstart = () => finish(true);
         utterance.onerror = () => finish(false);
 
-        // Some WebViews do not fire events reliably.
-        fallbackTimeout = setTimeout(() => finish(false), 2500);
+        // Some WebViews (including HA Companion on Android) can speak audio
+        // but never emit onstart/onend reliably. Treat a successful speak()
+        // call as success after a short grace period unless onerror fires.
+        optimisticTimeout = setTimeout(() => finish(true), 500);
+        fallbackTimeout = setTimeout(() => {
+          const synth = window.speechSynthesis;
+          const isActive = synth && (synth.speaking || synth.pending);
+          finish(Boolean(isActive));
+        }, 2500);
 
         window.speechSynthesis.cancel();
         window.speechSynthesis.speak(utterance);
