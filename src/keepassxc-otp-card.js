@@ -683,6 +683,7 @@ class KeePassXCOTPCard extends HTMLElement {
         align-items: center;
         gap: 12px;
         margin-bottom: 4px;
+        flex-wrap: wrap;
       }
       .otp-token {
         font-size: 32px;
@@ -690,8 +691,8 @@ class KeePassXCOTPCard extends HTMLElement {
         letter-spacing: 4px;
         color: var(--primary-color);
         user-select: all;
-        flex: 1;
-        min-width: 0;
+        flex: 0 0 auto;
+        min-width: fit-content;
         white-space: nowrap;
         word-break: keep-all;
         overflow-wrap: normal;
@@ -717,6 +718,8 @@ class KeePassXCOTPCard extends HTMLElement {
         display: flex;
         align-items: center;
         gap: 8px;
+        margin-left: auto;
+        flex: 0 0 auto;
       }
       .speak-button {
         display: flex;
