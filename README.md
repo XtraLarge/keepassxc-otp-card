@@ -148,6 +148,11 @@ type: custom:keepassxc-otp-card
 | `title` | string | `🔐 KeePassXC OTP` | Card title | ✅ Text input |
 | `person_entity_id` | string | `null` | Filter by person entity | ✅ Dropdown selector |
 | `show_person` | boolean | `false` | Show person name in details | ✅ Checkbox |
+| `speak_delay_ms` | number | `5000` | Delay before voice playback starts | ✅ Number input |
+| `use_home_assistant_tts_in_companion` | boolean | `false` | In Companion app use `tts.speak` service instead of browser speech | ✅ Checkbox |
+| `tts_entity_id` | string | `null` | Home Assistant TTS entity (e.g. `tts.piper`) | ✅ Text input |
+
+When Companion-TTS is enabled, the card opens the device selection dialog before countdown starts. The previously saved device is used only as the preselected default in the list and is stored per user in browser local storage.
 
 ---
 

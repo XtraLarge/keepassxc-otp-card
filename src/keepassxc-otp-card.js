@@ -537,11 +537,19 @@ class KeePassXCOTPCard extends HTMLElement {
     }
   }
 
-  speakTokenWithDelay(button, entityId) {
+  async speakTokenWithDelay(button, entityId) {
     const state = this._hass.states[entityId];
     if (!state) {
       this.showSpeakErrorState(button);
       return;
+    }
+
+    if (this.shouldUseHomeAssistantTts()) {
+      const selected = await this.ensureCompanionNotifyServiceSelected();
+      if (!selected) {
+        this.showSpeakErrorState(button);
+        return;
+      }
     }
 
     const existingTimeout = this._speakTimeouts.get(entityId);
@@ -556,7 +564,7 @@ class KeePassXCOTPCard extends HTMLElement {
     button.dataset.stateAt = Date.now().toString();
     button.dataset.speakAt = (Date.now() + delayMs).toString();
 
-    const timeoutId = setTimeout(() => {
+    const runSpeak = () => {
       this._speakTimeouts.delete(entityId);
       const currentState = this._hass.states[entityId];
       const token = currentState ? this.getStableTokenForEntity(currentState) : null;
@@ -576,21 +584,343 @@ class KeePassXCOTPCard extends HTMLElement {
         console.error('KeePassXC OTP: Speech synthesis failed:', error);
         this.showSpeakErrorState(button);
       });
-    }, delayMs);
+    };
 
+    // Keep speech in the direct click call stack when delay is 0.
+    // Android Home Assistant Companion WebView may reject speech calls
+    // that happen asynchronously even with a zero-delay timeout.
+    if (delayMs <= 0) {
+      runSpeak();
+      return;
+    }
+
+    const timeoutId = setTimeout(runSpeak, delayMs);
     this._speakTimeouts.set(entityId, timeoutId);
   }
 
   getSpeakDelayMs() {
-    // Some mobile webviews can reject speech synthesis calls if there is a
-    // long delay after the user click. In Home Assistant Companion we speak
-    // immediately so it still counts as user-initiated.
-    const userAgent = navigator.userAgent || '';
-    const isCompanionApp = /Home\s?Assistant/i.test(userAgent);
-    return isCompanionApp ? 0 : 5000;
+    const configuredDelay = Number(this.config?.speak_delay_ms);
+    if (Number.isFinite(configuredDelay) && configuredDelay >= 0) {
+      return configuredDelay;
+    }
+    return 5000;
   }
 
   speakToken(token) {
+    if (this.shouldUseHomeAssistantTts()) {
+      return this.speakTokenViaHomeAssistant(token);
+    }
+    return this.speakTokenInBrowser(token);
+  }
+
+  shouldUseHomeAssistantTts() {
+    return this.isCompanionApp() && this.config?.use_home_assistant_tts_in_companion === true;
+  }
+
+  isCompanionApp() {
+    const userAgent = navigator.userAgent || '';
+    return /Home\s?Assistant/i.test(userAgent);
+  }
+
+  async speakTokenViaHomeAssistant(token) {
+    try {
+      if (!this._hass?.callService) {
+        return false;
+      }
+      const message = String(token).split('').join(' ');
+
+      const notifyServiceName = await this.getCompanionNotifyService();
+      if (notifyServiceName) {
+        try {
+          const [domain, service] = String(notifyServiceName).split('.');
+          if (domain && service) {
+            await this._hass.callService(domain, service, {
+              message: 'TTS',
+              data: { tts_text: message }
+            });
+            return true;
+          }
+        } catch (notifyError) {
+          console.warn('KeePassXC OTP: Notify service failed, falling back to tts.speak:', notifyError);
+        }
+      }
+
+      return false;
+    } catch (error) {
+      console.error('KeePassXC OTP: Home Assistant TTS failed:', error);
+      return false;
+    }
+  }
+
+  async getCompanionNotifyService() {
+    if (!this.isCompanionApp()) {
+      return null;
+    }
+
+    if (this._cachedCompanionNotifyService) {
+      return this._cachedCompanionNotifyService;
+    }
+
+    const candidateId = window.externalApp?.deviceID
+      || window.externalApp?.deviceId
+      || window.externalApp?.device_id
+      || null;
+    const candidateName = window.externalApp?.deviceName
+      || window.externalApp?.device_name
+      || null;
+    const tokens = [candidateId, candidateName]
+      .filter(Boolean)
+      .map((value) => String(value)
+        .toLowerCase()
+        .replace(/[^a-z0-9_]+/g, '_')
+        .replace(/^_+|_+$/g, ''))
+      .filter(Boolean);
+
+    const preferredCandidates = tokens.map((token) => `notify.mobile_app_${token}`);
+    const discovered = await this.discoverMobileAppNotifyServices();
+    console.info('KeePassXC OTP: Companion notify detection candidates:', {
+      candidateId,
+      candidateName,
+      tokens,
+      preferredCandidates,
+      discovered
+    });
+
+    const exactMatch = preferredCandidates.find((candidate) => discovered.includes(candidate));
+    if (exactMatch) {
+      this._cachedCompanionNotifyService = exactMatch;
+      return exactMatch;
+    }
+
+    const fuzzyMatch = discovered.find((serviceName) =>
+      tokens.some((token) => serviceName.includes(token))
+    );
+    if (fuzzyMatch) {
+      this._cachedCompanionNotifyService = fuzzyMatch;
+      return fuzzyMatch;
+    }
+
+    if (discovered.length === 1) {
+      this._cachedCompanionNotifyService = discovered[0];
+      console.info('KeePassXC OTP: Companion notify auto-selected single service:', discovered[0]);
+      return discovered[0];
+    }
+
+    // Fallback: match current HA user to mobile_app device_tracker entities.
+    const userTrackerCandidates = this.getUserTrackerNotifyCandidates();
+    const trackerMatch = userTrackerCandidates.find((candidate) => discovered.includes(candidate));
+    if (trackerMatch) {
+      this._cachedCompanionNotifyService = trackerMatch;
+      console.info('KeePassXC OTP: Companion notify selected by user tracker match:', trackerMatch);
+      return trackerMatch;
+    }
+
+    const storedService = this.getStoredNotifyService();
+    if (storedService) {
+      return storedService;
+    }
+
+    const guessed = preferredCandidates[0] || null;
+    if (guessed) {
+      console.warn('KeePassXC OTP: Companion notify detection falling back to guessed service:', guessed);
+      return guessed;
+    }
+    return null;
+  }
+
+  async ensureCompanionNotifyServiceSelected() {
+    const discovered = await this.discoverMobileAppNotifyServices();
+    const suggested = await this.getCompanionNotifyService();
+    const selected = await this.promptForNotifyService(discovered, suggested);
+    if (!selected) {
+      return false;
+    }
+    this._cachedCompanionNotifyService = selected;
+    this.storeNotifyService(selected);
+    return true;
+  }
+
+  async discoverMobileAppNotifyServices() {
+    try {
+      if (!this._hass?.callWS) {
+        return [];
+      }
+      const services = await this._hass.callWS({ type: 'get_services' });
+      const notifyServices = services?.notify ? Object.keys(services.notify) : [];
+      return notifyServices
+        .filter((serviceName) => serviceName.startsWith('mobile_app_'))
+        .map((serviceName) => `notify.${serviceName}`);
+    } catch (error) {
+      console.warn('KeePassXC OTP: Could not discover notify services:', error);
+      return [];
+    }
+  }
+
+  getUserTrackerNotifyCandidates() {
+    if (!this._hass?.states) {
+      return [];
+    }
+    const currentUserId = this._hass?.user?.id || null;
+    const candidates = Object.entries(this._hass.states)
+      .filter(([entityId, state]) => entityId.startsWith('device_tracker.'))
+      .filter(([, state]) => !currentUserId || state.attributes?.user_id === currentUserId)
+      .sort(([, a], [, b]) => new Date(b.last_updated).getTime() - new Date(a.last_updated).getTime())
+      .map(([entityId]) => `notify.mobile_app_${entityId.replace('device_tracker.', '')}`);
+    return Array.from(new Set(candidates));
+  }
+
+  getStoredNotifyService() {
+    try {
+      const key = this.getNotifyServiceStorageKey();
+      const value = window.localStorage.getItem(key);
+      if (value && /^notify\.mobile_app_[a-z0-9_]+$/i.test(value)) {
+        return value;
+      }
+    } catch (error) {
+      console.warn('KeePassXC OTP: Failed to read stored notify service:', error);
+    }
+    return null;
+  }
+
+  storeNotifyService(serviceName) {
+    try {
+      const key = this.getNotifyServiceStorageKey();
+      window.localStorage.setItem(key, serviceName);
+    } catch (error) {
+      console.warn('KeePassXC OTP: Failed to store notify service:', error);
+    }
+  }
+
+  getNotifyServiceStorageKey() {
+    const userId = this._hass?.user?.id || 'default';
+    return `keepassxc_otp_notify_service_${userId}`;
+  }
+
+  async promptForNotifyService(discovered, preselected) {
+    if (Array.isArray(discovered) && discovered.length > 0) {
+      return new Promise((resolve) => {
+        const backdrop = document.createElement('div');
+        backdrop.style.position = 'fixed';
+        backdrop.style.inset = '0';
+        backdrop.style.background = 'rgba(0, 0, 0, 0.45)';
+        backdrop.style.display = 'flex';
+        backdrop.style.alignItems = 'center';
+        backdrop.style.justifyContent = 'center';
+        backdrop.style.zIndex = '9999';
+
+        const dialog = document.createElement('div');
+        dialog.style.background = 'var(--card-background-color, #fff)';
+        dialog.style.color = 'var(--primary-text-color, #111)';
+        dialog.style.borderRadius = '10px';
+        dialog.style.padding = '16px';
+        dialog.style.maxWidth = '420px';
+        dialog.style.width = 'calc(100% - 32px)';
+        dialog.style.boxShadow = '0 8px 24px rgba(0,0,0,0.2)';
+
+        const title = document.createElement('div');
+        title.textContent = 'Ausgabegerät auswählen';
+        title.style.fontWeight = '600';
+        title.style.marginBottom = '8px';
+
+        const subtitle = document.createElement('div');
+        subtitle.textContent = 'Bitte wähle das Gerät für die OTP-Sprachausgabe.';
+        subtitle.style.fontSize = '13px';
+        subtitle.style.opacity = '0.85';
+        subtitle.style.marginBottom = '12px';
+
+        const select = document.createElement('select');
+        select.style.width = '100%';
+        select.style.padding = '10px';
+        select.style.borderRadius = '8px';
+        select.style.border = '1px solid var(--divider-color, #ccc)';
+        discovered.forEach((serviceName) => {
+          const option = document.createElement('option');
+          option.value = serviceName;
+          option.textContent = this.formatNotifyServiceForDisplay(serviceName);
+          select.appendChild(option);
+        });
+        const defaultOption = preselected && discovered.includes(preselected)
+          ? preselected
+          : (discovered[0] || '');
+        if (defaultOption) {
+          select.value = defaultOption;
+        }
+
+        const buttons = document.createElement('div');
+        buttons.style.display = 'flex';
+        buttons.style.justifyContent = 'flex-end';
+        buttons.style.gap = '8px';
+        buttons.style.marginTop = '14px';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.textContent = 'Abbrechen';
+        cancelBtn.style.padding = '8px 12px';
+        cancelBtn.style.borderRadius = '8px';
+        cancelBtn.style.border = '1px solid var(--divider-color, #ccc)';
+        cancelBtn.style.background = 'transparent';
+
+        const saveBtn = document.createElement('button');
+        saveBtn.textContent = 'Übernehmen';
+        saveBtn.style.padding = '8px 12px';
+        saveBtn.style.borderRadius = '8px';
+        saveBtn.style.border = 'none';
+        saveBtn.style.background = 'var(--primary-color, #03a9f4)';
+        saveBtn.style.color = '#fff';
+
+        const cleanup = (value) => {
+          backdrop.remove();
+          resolve(value);
+        };
+
+        cancelBtn.addEventListener('click', () => cleanup(null));
+        saveBtn.addEventListener('click', () => {
+          const value = select.value;
+          cleanup(value || null);
+        });
+        backdrop.addEventListener('click', (event) => {
+          if (event.target === backdrop) {
+            cleanup(null);
+          }
+        });
+
+        buttons.appendChild(cancelBtn);
+        buttons.appendChild(saveBtn);
+        dialog.appendChild(title);
+        dialog.appendChild(subtitle);
+        dialog.appendChild(select);
+        dialog.appendChild(buttons);
+        backdrop.appendChild(dialog);
+        document.body.appendChild(backdrop);
+      });
+    }
+
+    if (typeof window.prompt !== 'function') {
+      return null;
+    }
+    const defaultValue = preselected || discovered[0] || 'notify.mobile_app_';
+    const entered = window.prompt(
+      'KeePassXC OTP: Bitte notify Service eingeben (z.B. notify.mobile_app_s26ultra)',
+      defaultValue
+    );
+    if (!entered) {
+      return null;
+    }
+    const normalized = entered.trim();
+    if (!/^notify\.mobile_app_[a-z0-9_]+$/i.test(normalized)) {
+      console.warn('KeePassXC OTP: Invalid notify service entered:', normalized);
+      return null;
+    }
+    return normalized;
+  }
+
+  formatNotifyServiceForDisplay(serviceName) {
+    return String(serviceName)
+      .replace(/^notify\.mobile_app_/, '')
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, (char) => char.toUpperCase());
+  }
+
+  speakTokenInBrowser(token) {
     if (!window.speechSynthesis || typeof SpeechSynthesisUtterance === 'undefined') {
       return Promise.resolve(false);
     }
@@ -600,6 +930,7 @@ class KeePassXCOTPCard extends HTMLElement {
         const speakableToken = String(token).split('').join(' ');
         const utterance = new SpeechSynthesisUtterance(speakableToken);
         let resolved = false;
+        let optimisticTimeout = null;
         let fallbackTimeout = null;
 
         const finish = (result) => {
@@ -607,9 +938,8 @@ class KeePassXCOTPCard extends HTMLElement {
             return;
           }
           resolved = true;
-          if (fallbackTimeout) {
-            clearTimeout(fallbackTimeout);
-          }
+          if (optimisticTimeout) clearTimeout(optimisticTimeout);
+          if (fallbackTimeout) clearTimeout(fallbackTimeout);
           resolve(result);
         };
 
@@ -618,8 +948,15 @@ class KeePassXCOTPCard extends HTMLElement {
         utterance.onstart = () => finish(true);
         utterance.onerror = () => finish(false);
 
-        // Some WebViews do not fire events reliably.
-        fallbackTimeout = setTimeout(() => finish(false), 2500);
+        // Some WebViews (including HA Companion on Android) can speak audio
+        // but never emit onstart/onend reliably. Treat a successful speak()
+        // call as success after a short grace period unless onerror fires.
+        optimisticTimeout = setTimeout(() => finish(true), 500);
+        fallbackTimeout = setTimeout(() => {
+          const synth = window.speechSynthesis;
+          const isActive = synth && (synth.speaking || synth.pending);
+          finish(Boolean(isActive));
+        }, 2500);
 
         window.speechSynthesis.cancel();
         window.speechSynthesis.speak(utterance);
