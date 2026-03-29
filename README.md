@@ -151,8 +151,8 @@ type: custom:keepassxc-otp-card
 | `speak_delay_ms` | number | `5000` | Delay before voice playback starts | ✅ Number input |
 | `use_home_assistant_tts_in_companion` | boolean | `false` | In Companion app use `tts.speak` service instead of browser speech | ✅ Checkbox |
 | `tts_entity_id` | string | `null` | Home Assistant TTS entity (e.g. `tts.piper`) | ✅ Text input |
-| `tts_media_player_entity_id` | string | `null` | Target media player for `tts.speak` (e.g. `media_player.pixel_8`) | ✅ Text input |
-| `tts_notify_service` | string | `null` | Alternative for phones without media_player entity; if empty, card tries to auto-detect `notify.mobile_app_<device_id>` in Companion app | ✅ Text input |
+
+When Companion-TTS is enabled, the card now auto-detects the current device targets (`notify.mobile_app_<device_id>` and matching `media_player.*`) instead of requiring manual target selection.
 
 ---
 

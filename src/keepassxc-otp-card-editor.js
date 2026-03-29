@@ -77,31 +77,6 @@ class KeePassXCOTPCardEditor extends HTMLElement {
             />
           </div>
 
-          <div class="option">
-            <label class="label">
-              <span>TTS Media Player</span>
-              <span class="secondary">Example: media_player.pixel_8</span>
-            </label>
-            <input
-              type="text"
-              id="tts_media_player_entity_id"
-              class="value"
-              placeholder="media_player.phone"
-            />
-          </div>
-
-          <div class="option">
-            <label class="label">
-              <span>Notify Service (optional)</span>
-              <span class="secondary">Alternative without media_player, e.g. notify.mobile_app_pixel_8 (leave empty for auto-detect in Companion)</span>
-            </label>
-            <input
-              type="text"
-              id="tts_notify_service"
-              class="value"
-              placeholder="notify.mobile_app_pixel_8"
-            />
-          </div>
         </div>
         <style>
           ${this.getStyles()}
@@ -137,16 +112,6 @@ class KeePassXCOTPCardEditor extends HTMLElement {
         ttsEntityInput.value = this._config.tts_entity_id || '';
       }
 
-      const ttsMediaPlayerInput = this.querySelector('#tts_media_player_entity_id');
-      if (ttsMediaPlayerInput) {
-        ttsMediaPlayerInput.value = this._config.tts_media_player_entity_id || '';
-      }
-
-      const ttsNotifyServiceInput = this.querySelector('#tts_notify_service');
-      if (ttsNotifyServiceInput) {
-        ttsNotifyServiceInput.value = this._config.tts_notify_service || '';
-      }
-      
       this._setupListeners();
       
       // Populate person selector if hass is already available
@@ -171,8 +136,7 @@ class KeePassXCOTPCardEditor extends HTMLElement {
     const speakDelayInput = this.querySelector('#speak_delay_ms');
     const useHaTtsCheckbox = this.querySelector('#use_home_assistant_tts_in_companion');
     const ttsEntityInput = this.querySelector('#tts_entity_id');
-    const ttsMediaPlayerInput = this.querySelector('#tts_media_player_entity_id');
-    const ttsNotifyServiceInput = this.querySelector('#tts_notify_service');
+    
 
     titleInput.addEventListener('change', (e) => {
       const value = e.target.value.trim();
@@ -223,25 +187,6 @@ class KeePassXCOTPCardEditor extends HTMLElement {
       this._fireConfigChanged();
     });
 
-    ttsMediaPlayerInput.addEventListener('change', (e) => {
-      const value = e.target.value.trim();
-      if (value) {
-        this._config.tts_media_player_entity_id = value;
-      } else {
-        delete this._config.tts_media_player_entity_id;
-      }
-      this._fireConfigChanged();
-    });
-
-    ttsNotifyServiceInput.addEventListener('change', (e) => {
-      const value = e.target.value.trim();
-      if (value) {
-        this._config.tts_notify_service = value;
-      } else {
-        delete this._config.tts_notify_service;
-      }
-      this._fireConfigChanged();
-    });
   }
 
   _populatePersonSelector() {
