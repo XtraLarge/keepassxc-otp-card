@@ -237,9 +237,18 @@ Contributions are welcome!
 
 ### Maintainer release flow
 
-- Push a tag starting with `v` to create a release automatically (workflow: `.github/workflows/release.yml`)
-- Tags containing `-` (for example `v2.2.0-beta.1`) are published as **prerelease/beta**
-- Tags without `-` (for example `v2.1.0`) are published as **stable**
+Use a 3-step flow with `beta` + `main`:
+
+1. **Develop and test in `beta` branch**
+   - Open feature PRs with base branch `beta`
+   - CI workflow `.github/workflows/ci-beta.yml` validates each push/PR to `beta`
+2. **Merge tested changes from `beta` to `main`**
+3. **Publish from `main` (GitHub Releases UI)**
+   - Create a release tag from `main`, for example:
+     - `v2.2.0-beta.1` and mark as prerelease (**beta**)
+     - `v2.2.0` and mark as normal release (**stable/GA**)
+   - Workflow `.github/workflows/release.yml` only accepts tags that point to commits on `main`
+   - The workflow builds and uploads `dist/keepassxc-otp-card.js` to the published release
 
 ---
 
