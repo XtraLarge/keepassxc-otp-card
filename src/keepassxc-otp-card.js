@@ -5,6 +5,8 @@ class KeePassXCOTPCard extends HTMLElement {
     this._entities = [];     // Store current entities
     this._animationFrameId = null;  // Track animation frame
     this._lastUpdateTime = 0;  // Track last update timestamp
+    this._speakTimeouts = new Map(); // Track delayed speak timers
+    this._stableTokens = new Map(); // Keep token stable within one OTP time slice
   }
 
   setConfig(config) {
@@ -40,6 +42,10 @@ class KeePassXCOTPCard extends HTMLElement {
       cancelAnimationFrame(this._animationFrameId);
       this._animationFrameId = null;
     }
+
+    this._speakTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
+    this._speakTimeouts.clear();
+    this._stableTokens.clear();
   }
 
   startAnimationLoop() {
@@ -168,11 +174,7 @@ class KeePassXCOTPCard extends HTMLElement {
       // Clean up expired "Copied!" states
       const now = Date.now();
       const buttons = this.querySelectorAll('.copy-button[data-state]');
-      
-      if (!buttons || buttons.length === 0) {
-        return;  // No buttons to update
-      }
-      
+
       buttons.forEach(button => {
         try {
           const copiedAt = parseInt(button.dataset.copiedAt || '0');
@@ -190,6 +192,34 @@ class KeePassXCOTPCard extends HTMLElement {
         } catch (buttonError) {
           console.error('KeePassXC OTP: Error updating button state:', buttonError);
           // Continue with other buttons
+        }
+      });
+
+      const speakButtons = this.querySelectorAll('.speak-button[data-state]');
+      speakButtons.forEach(button => {
+        try {
+          const state = button.dataset.state;
+          const icon = button.querySelector('.speak-icon');
+          const text = button.querySelector('.speak-text');
+
+          if (state === 'pending') {
+            const speakAt = parseInt(button.dataset.speakAt || '0');
+            const remainingMs = speakAt - now;
+            const remainingSeconds = Math.max(0, Math.ceil(remainingMs / 1000));
+            if (icon) icon.textContent = '🔊';
+            if (text) text.textContent = `${remainingSeconds}s`;
+          } else {
+            const stateAt = parseInt(button.dataset.stateAt || '0');
+            if (now - stateAt > 1200) {
+              delete button.dataset.state;
+              delete button.dataset.stateAt;
+              delete button.dataset.speakAt;
+              if (icon) icon.textContent = '🔊';
+              if (text) text.textContent = 'Speak';
+            }
+          }
+        } catch (speakButtonError) {
+          console.error('KeePassXC OTP: Error updating speak button state:', speakButtonError);
         }
       });
     } catch (error) {
@@ -229,6 +259,14 @@ class KeePassXCOTPCard extends HTMLElement {
         const nameB = b.attributes.friendly_name || b.entity_id;
         return nameA.localeCompare(nameB);
       });
+
+    // Remove cached token entries for entities that no longer exist
+    const activeEntityIds = new Set(otpEntities.map(entity => entity.entity_id));
+    this._stableTokens.forEach((_, entityId) => {
+      if (!activeEntityIds.has(entityId)) {
+        this._stableTokens.delete(entityId);
+      }
+    });
 
     if (otpEntities.length === 0) {
       this.content.innerHTML = `
@@ -273,6 +311,15 @@ class KeePassXCOTPCard extends HTMLElement {
           this.copyTokenWithButton(e.currentTarget, entityId);
         });
       });
+
+      this.content.querySelectorAll('.speak-button').forEach(button => {
+        button.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const entityId = e.currentTarget.dataset.entityId;
+          this.speakTokenWithDelay(e.currentTarget, entityId);
+        });
+      });
       
       this._rendered = true;
       this._entities = otpEntities;
@@ -287,12 +334,27 @@ class KeePassXCOTPCard extends HTMLElement {
     entities.forEach(entity => {
       const tokenElement = this.content.querySelector(`.otp-token[data-entity-id="${entity.entity_id}"]`);
       if (tokenElement) {
-        const token = entity.state;
+        const token = this.getStableTokenForEntity(entity);
         const digits = entity.attributes.digits || token.length;
         const formattedToken = this.formatToken(token, digits);
         tokenElement.textContent = formattedToken;
       }
     });
+  }
+
+  getStableTokenForEntity(entity) {
+    const entityId = entity.entity_id;
+    const token = String(entity.state || '');
+    const period = entity.attributes.period || 30;
+    const currentSlice = Math.floor(Date.now() / 1000 / period);
+    const existing = this._stableTokens.get(entityId);
+
+    if (!existing || existing.slice !== currentSlice) {
+      this._stableTokens.set(entityId, { slice: currentSlice, token });
+      return token;
+    }
+
+    return existing.token;
   }
 
   formatToken(token, digits) {
@@ -304,11 +366,12 @@ class KeePassXCOTPCard extends HTMLElement {
     
     // Use actual token length for split position to handle any length correctly
     const half = Math.floor(token.length / 2);
-    return token.slice(0, half) + ' ' + token.slice(half);
+    // Use non-breaking space to avoid line wrap between token groups on mobile
+    return token.slice(0, half) + '\u00A0' + token.slice(half);
   }
 
   renderOTPEntry(entity) {
-    const token = entity.state;
+    const token = this.getStableTokenForEntity(entity);
     const period = entity.attributes.period || 30;
     const digits = entity.attributes.digits || token.length;
     const issuer = entity.attributes.issuer || '';
@@ -378,10 +441,16 @@ class KeePassXCOTPCard extends HTMLElement {
           <div class="otp-name">${name}</div>
           <div class="otp-token-row">
             <div class="otp-token" data-entity-id="${entity.entity_id}">${formattedToken}</div>
-            <button class="copy-button" data-entity-id="${entity.entity_id}" title="Copy to clipboard">
-              <span class="copy-icon">📋</span>
-              <span class="copy-text">Copy</span>
-            </button>
+            <div class="otp-actions">
+              <button class="copy-button" data-entity-id="${entity.entity_id}" title="Copy to clipboard">
+                <span class="copy-icon">📋</span>
+                <span class="copy-text">Copy</span>
+              </button>
+              <button class="speak-button" data-entity-id="${entity.entity_id}" title="Read OTP after 5 seconds">
+                <span class="speak-icon">🔊</span>
+                <span class="speak-text">Speak</span>
+              </button>
+            </div>
           </div>
           ${detailsHtml ? `<div class="otp-details">${detailsHtml}</div>` : ''}
         </div>
@@ -391,7 +460,7 @@ class KeePassXCOTPCard extends HTMLElement {
 
   async copyTokenWithButton(button, entityId) {
     const state = this._hass.states[entityId];
-    const token = state.state;
+    const token = state ? this.getStableTokenForEntity(state) : '';
     
     try {
       // Try modern Clipboard API first (requires HTTPS or localhost)
@@ -466,6 +535,85 @@ class KeePassXCOTPCard extends HTMLElement {
     } finally {
       document.body.removeChild(input);
     }
+  }
+
+  speakTokenWithDelay(button, entityId) {
+    const state = this._hass.states[entityId];
+    if (!state) {
+      this.showSpeakErrorState(button);
+      return;
+    }
+
+    const existingTimeout = this._speakTimeouts.get(entityId);
+    if (existingTimeout) {
+      clearTimeout(existingTimeout);
+      this._speakTimeouts.delete(entityId);
+    }
+
+    button.dataset.state = 'pending';
+    button.dataset.stateAt = Date.now().toString();
+    button.dataset.speakAt = (Date.now() + 5000).toString();
+
+    const timeoutId = setTimeout(() => {
+      this._speakTimeouts.delete(entityId);
+      const currentState = this._hass.states[entityId];
+      const token = currentState ? this.getStableTokenForEntity(currentState) : null;
+
+      if (!token) {
+        this.showSpeakErrorState(button);
+        return;
+      }
+
+      const spoken = this.speakToken(token);
+      if (spoken) {
+        this.showSpokenState(button);
+      } else {
+        this.showSpeakErrorState(button);
+      }
+    }, 5000);
+
+    this._speakTimeouts.set(entityId, timeoutId);
+  }
+
+  speakToken(token) {
+    if (!window.speechSynthesis || typeof SpeechSynthesisUtterance === 'undefined') {
+      return false;
+    }
+
+    try {
+      const speakableToken = String(token).split('').join(' ');
+      const utterance = new SpeechSynthesisUtterance(speakableToken);
+      utterance.lang = this._hass?.language || navigator.language || 'en-US';
+      utterance.rate = 0.9;
+      window.speechSynthesis.cancel();
+      window.speechSynthesis.speak(utterance);
+      return true;
+    } catch (error) {
+      console.error('KeePassXC OTP: Speech synthesis failed:', error);
+      return false;
+    }
+  }
+
+  showSpokenState(button) {
+    button.dataset.state = 'spoken';
+    button.dataset.stateAt = Date.now().toString();
+    delete button.dataset.speakAt;
+
+    const icon = button.querySelector('.speak-icon');
+    const text = button.querySelector('.speak-text');
+    if (icon) icon.textContent = '✅';
+    if (text) text.textContent = 'Spoken';
+  }
+
+  showSpeakErrorState(button) {
+    button.dataset.state = 'error';
+    button.dataset.stateAt = Date.now().toString();
+    delete button.dataset.speakAt;
+
+    const icon = button.querySelector('.speak-icon');
+    const text = button.querySelector('.speak-text');
+    if (icon) icon.textContent = '❌';
+    if (text) text.textContent = 'Error';
   }
 
   escapeHtml(text) {
@@ -560,6 +708,7 @@ class KeePassXCOTPCard extends HTMLElement {
         align-items: center;
         gap: 12px;
         margin-bottom: 4px;
+        flex-wrap: wrap;
       }
       .otp-token {
         font-size: 32px;
@@ -567,8 +716,11 @@ class KeePassXCOTPCard extends HTMLElement {
         letter-spacing: 4px;
         color: var(--primary-color);
         user-select: all;
-        flex: 1;
-        min-width: 0;
+        flex: 0 0 auto;
+        min-width: fit-content;
+        white-space: nowrap;
+        word-break: keep-all;
+        overflow-wrap: normal;
         /* No hover effect - token is not interactive */
       }
       .copy-button {
@@ -587,11 +739,34 @@ class KeePassXCOTPCard extends HTMLElement {
         white-space: nowrap;
         flex-shrink: 0;
       }
-      .copy-button:hover {
+      .otp-actions {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-left: auto;
+        flex: 0 0 auto;
+      }
+      .speak-button {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 16px;
+        background: var(--secondary-background-color, #546e7a);
+        color: white;
+        border: none;
+        border-radius: 20px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        transition: background 0.2s ease, transform 0.1s ease;
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .copy-button:hover, .speak-button:hover {
         transform: translateY(-1px);
         box-shadow: 0 4px 8px rgba(0,0,0,0.2);
       }
-      .copy-button:active {
+      .copy-button:active, .speak-button:active {
         transform: translateY(0);
       }
       .copy-button[data-state="copied"] {
@@ -599,6 +774,17 @@ class KeePassXCOTPCard extends HTMLElement {
         animation: pulse 0.3s ease;
       }
       .copy-button[data-state="error"] {
+        background: #f44336 !important;
+        animation: shake 0.3s ease;
+      }
+      .speak-button[data-state="pending"] {
+        background: #607d8b !important;
+      }
+      .speak-button[data-state="spoken"] {
+        background: #4caf50 !important;
+        animation: pulse 0.3s ease;
+      }
+      .speak-button[data-state="error"] {
         background: #f44336 !important;
         animation: shake 0.3s ease;
       }
@@ -616,6 +802,14 @@ class KeePassXCOTPCard extends HTMLElement {
         line-height: 1;
       }
       .copy-text {
+        font-size: 14px;
+        line-height: 1;
+      }
+      .speak-icon {
+        font-size: 16px;
+        line-height: 1;
+      }
+      .speak-text {
         font-size: 14px;
         line-height: 1;
       }
@@ -639,6 +833,29 @@ class KeePassXCOTPCard extends HTMLElement {
       .otp-url:hover {
         color: var(--accent-color);
         text-decoration: underline;
+      }
+      @media (max-width: 600px) {
+        .otp-token-row {
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 8px;
+        }
+        .otp-token {
+          font-size: 28px;
+          letter-spacing: 2.5px;
+          width: 100%;
+        }
+        .copy-button {
+          padding: 8px 12px;
+          align-self: flex-start;
+        }
+        .otp-actions {
+          width: 100%;
+        }
+        .speak-button {
+          padding: 8px 12px;
+          align-self: flex-start;
+        }
       }
     `;
   }
@@ -673,7 +890,7 @@ window.customCards.push({
 });
 
 console.info(
-  '%c KEEPASSXC-OTP-CARD %c v2.0.0 ',
+  '%c KEEPASSXC-OTP-CARD %c v2.0.1-beta.2 ',
   'color: white; background: #039be5; font-weight: 700;',
   'color: #039be5; background: white; font-weight: 700;'
 );
