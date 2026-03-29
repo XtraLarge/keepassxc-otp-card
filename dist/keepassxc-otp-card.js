@@ -852,11 +852,19 @@ class KeePassXCOTPCard extends HTMLElement {
     }
   }
 
-  speakTokenWithDelay(button, entityId) {
+  async speakTokenWithDelay(button, entityId) {
     const state = this._hass.states[entityId];
     if (!state) {
       this.showSpeakErrorState(button);
       return;
+    }
+
+    if (this.shouldUseHomeAssistantTts()) {
+      const selected = await this.ensureCompanionNotifyServiceSelected();
+      if (!selected) {
+        this.showSpeakErrorState(button);
+        return;
+      }
     }
 
     const existingTimeout = this._speakTimeouts.get(entityId);
@@ -968,13 +976,6 @@ class KeePassXCOTPCard extends HTMLElement {
       return this._cachedCompanionNotifyService;
     }
 
-    const storedService = this.getStoredNotifyService();
-    if (storedService) {
-      this._cachedCompanionNotifyService = storedService;
-      console.info('KeePassXC OTP: Using stored notify service override:', storedService);
-      return storedService;
-    }
-
     const candidateId = window.externalApp?.deviceID
       || window.externalApp?.deviceId
       || window.externalApp?.device_id
@@ -1029,20 +1030,29 @@ class KeePassXCOTPCard extends HTMLElement {
       return trackerMatch;
     }
 
+    const storedService = this.getStoredNotifyService();
+    if (storedService) {
+      return storedService;
+    }
+
     const guessed = preferredCandidates[0] || null;
     if (guessed) {
       console.warn('KeePassXC OTP: Companion notify detection falling back to guessed service:', guessed);
       return guessed;
     }
-
-    const prompted = await this.promptForNotifyService(discovered);
-    if (prompted) {
-      this._cachedCompanionNotifyService = prompted;
-      this.storeNotifyService(prompted);
-      return prompted;
-    }
-
     return null;
+  }
+
+  async ensureCompanionNotifyServiceSelected() {
+    const discovered = await this.discoverMobileAppNotifyServices();
+    const suggested = await this.getCompanionNotifyService();
+    const selected = await this.promptForNotifyService(discovered, suggested);
+    if (!selected) {
+      return false;
+    }
+    this._cachedCompanionNotifyService = selected;
+    this.storeNotifyService(selected);
+    return true;
   }
 
   async discoverMobileAppNotifyServices() {
@@ -1101,17 +1111,108 @@ class KeePassXCOTPCard extends HTMLElement {
     return `keepassxc_otp_notify_service_${userId}`;
   }
 
-  async promptForNotifyService(discovered) {
-    if (this._notifyPromptShown) {
-      return null;
+  async promptForNotifyService(discovered, preselected) {
+    if (Array.isArray(discovered) && discovered.length > 0) {
+      return new Promise((resolve) => {
+        const backdrop = document.createElement('div');
+        backdrop.style.position = 'fixed';
+        backdrop.style.inset = '0';
+        backdrop.style.background = 'rgba(0, 0, 0, 0.45)';
+        backdrop.style.display = 'flex';
+        backdrop.style.alignItems = 'center';
+        backdrop.style.justifyContent = 'center';
+        backdrop.style.zIndex = '9999';
+
+        const dialog = document.createElement('div');
+        dialog.style.background = 'var(--card-background-color, #fff)';
+        dialog.style.color = 'var(--primary-text-color, #111)';
+        dialog.style.borderRadius = '10px';
+        dialog.style.padding = '16px';
+        dialog.style.maxWidth = '420px';
+        dialog.style.width = 'calc(100% - 32px)';
+        dialog.style.boxShadow = '0 8px 24px rgba(0,0,0,0.2)';
+
+        const title = document.createElement('div');
+        title.textContent = 'Ausgabegerät auswählen';
+        title.style.fontWeight = '600';
+        title.style.marginBottom = '8px';
+
+        const subtitle = document.createElement('div');
+        subtitle.textContent = 'Bitte wähle das Gerät für die OTP-Sprachausgabe.';
+        subtitle.style.fontSize = '13px';
+        subtitle.style.opacity = '0.85';
+        subtitle.style.marginBottom = '12px';
+
+        const select = document.createElement('select');
+        select.style.width = '100%';
+        select.style.padding = '10px';
+        select.style.borderRadius = '8px';
+        select.style.border = '1px solid var(--divider-color, #ccc)';
+        discovered.forEach((serviceName) => {
+          const option = document.createElement('option');
+          option.value = serviceName;
+          option.textContent = this.formatNotifyServiceForDisplay(serviceName);
+          select.appendChild(option);
+        });
+        const defaultOption = preselected && discovered.includes(preselected)
+          ? preselected
+          : (discovered[0] || '');
+        if (defaultOption) {
+          select.value = defaultOption;
+        }
+
+        const buttons = document.createElement('div');
+        buttons.style.display = 'flex';
+        buttons.style.justifyContent = 'flex-end';
+        buttons.style.gap = '8px';
+        buttons.style.marginTop = '14px';
+
+        const cancelBtn = document.createElement('button');
+        cancelBtn.textContent = 'Abbrechen';
+        cancelBtn.style.padding = '8px 12px';
+        cancelBtn.style.borderRadius = '8px';
+        cancelBtn.style.border = '1px solid var(--divider-color, #ccc)';
+        cancelBtn.style.background = 'transparent';
+
+        const saveBtn = document.createElement('button');
+        saveBtn.textContent = 'Übernehmen';
+        saveBtn.style.padding = '8px 12px';
+        saveBtn.style.borderRadius = '8px';
+        saveBtn.style.border = 'none';
+        saveBtn.style.background = 'var(--primary-color, #03a9f4)';
+        saveBtn.style.color = '#fff';
+
+        const cleanup = (value) => {
+          backdrop.remove();
+          resolve(value);
+        };
+
+        cancelBtn.addEventListener('click', () => cleanup(null));
+        saveBtn.addEventListener('click', () => {
+          const value = select.value;
+          cleanup(value || null);
+        });
+        backdrop.addEventListener('click', (event) => {
+          if (event.target === backdrop) {
+            cleanup(null);
+          }
+        });
+
+        buttons.appendChild(cancelBtn);
+        buttons.appendChild(saveBtn);
+        dialog.appendChild(title);
+        dialog.appendChild(subtitle);
+        dialog.appendChild(select);
+        dialog.appendChild(buttons);
+        backdrop.appendChild(dialog);
+        document.body.appendChild(backdrop);
+      });
     }
-    this._notifyPromptShown = true;
 
     if (typeof window.prompt !== 'function') {
       return null;
     }
-
-    const defaultValue = discovered[0] || 'notify.mobile_app_';
+    const defaultValue = preselected || discovered[0] || 'notify.mobile_app_';
     const entered = window.prompt(
       'KeePassXC OTP: Bitte notify Service eingeben (z.B. notify.mobile_app_s26ultra)',
       defaultValue
@@ -1125,6 +1226,13 @@ class KeePassXCOTPCard extends HTMLElement {
       return null;
     }
     return normalized;
+  }
+
+  formatNotifyServiceForDisplay(serviceName) {
+    return String(serviceName)
+      .replace(/^notify\.mobile_app_/, '')
+      .replace(/_/g, ' ')
+      .replace(/\b\w/g, (char) => char.toUpperCase());
   }
 
   speakTokenInBrowser(token) {
