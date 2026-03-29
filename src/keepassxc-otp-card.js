@@ -606,13 +606,7 @@ class KeePassXCOTPCard extends HTMLElement {
   }
 
   shouldUseHomeAssistantTts() {
-    if (!this.isCompanionApp()) {
-      return false;
-    }
-    if (this.config?.use_home_assistant_tts_in_companion !== true) {
-      return false;
-    }
-    return Boolean(this.getCompanionNotifyService() || (this.config?.tts_entity_id && this.getCompanionMediaPlayerEntityId()));
+    return this.isCompanionApp() && this.config?.use_home_assistant_tts_in_companion === true;
   }
 
   isCompanionApp() {
@@ -627,17 +621,20 @@ class KeePassXCOTPCard extends HTMLElement {
       }
       const message = String(token).split('').join(' ');
 
-      const notifyServiceName = this.getCompanionNotifyService();
+      const notifyServiceName = await this.getCompanionNotifyService();
       if (notifyServiceName) {
-        const [domain, service] = String(notifyServiceName).split('.');
-        if (!domain || !service) {
-          return false;
+        try {
+          const [domain, service] = String(notifyServiceName).split('.');
+          if (domain && service) {
+            await this._hass.callService(domain, service, {
+              message: 'TTS',
+              data: { tts_text: message }
+            });
+            return true;
+          }
+        } catch (notifyError) {
+          console.warn('KeePassXC OTP: Notify service failed, falling back to tts.speak:', notifyError);
         }
-        await this._hass.callService(domain, service, {
-          message: 'TTS',
-          data: { tts_text: message }
-        });
-        return true;
       }
 
       const mediaPlayerEntityId = this.getCompanionMediaPlayerEntityId();
@@ -658,31 +655,69 @@ class KeePassXCOTPCard extends HTMLElement {
     }
   }
 
-  getCompanionNotifyService() {
+  async getCompanionNotifyService() {
     if (!this.isCompanionApp()) {
       return null;
     }
 
-    // Try to infer device id from Companion app bridge.
+    if (this._cachedCompanionNotifyService) {
+      return this._cachedCompanionNotifyService;
+    }
+
     const candidateId = window.externalApp?.deviceID
       || window.externalApp?.deviceId
       || window.externalApp?.device_id
       || null;
+    const candidateName = window.externalApp?.deviceName
+      || window.externalApp?.device_name
+      || null;
+    const tokens = [candidateId, candidateName]
+      .filter(Boolean)
+      .map((value) => String(value)
+        .toLowerCase()
+        .replace(/[^a-z0-9_]+/g, '_')
+        .replace(/^_+|_+$/g, ''))
+      .filter(Boolean);
 
-    if (!candidateId) {
-      return null;
+    const preferredCandidates = tokens.map((token) => `notify.mobile_app_${token}`);
+    const discovered = await this.discoverMobileAppNotifyServices();
+
+    const exactMatch = preferredCandidates.find((candidate) => discovered.includes(candidate));
+    if (exactMatch) {
+      this._cachedCompanionNotifyService = exactMatch;
+      return exactMatch;
     }
 
-    const slug = String(candidateId)
-      .toLowerCase()
-      .replace(/[^a-z0-9_]+/g, '_')
-      .replace(/^_+|_+$/g, '');
-
-    if (!slug) {
-      return null;
+    const fuzzyMatch = discovered.find((serviceName) =>
+      tokens.some((token) => serviceName.includes(token))
+    );
+    if (fuzzyMatch) {
+      this._cachedCompanionNotifyService = fuzzyMatch;
+      return fuzzyMatch;
     }
 
-    return `notify.mobile_app_${slug}`;
+    if (discovered.length === 1) {
+      this._cachedCompanionNotifyService = discovered[0];
+      return discovered[0];
+    }
+
+    return preferredCandidates[0] || null;
+  }
+
+  async discoverMobileAppNotifyServices() {
+    try {
+      if (!this._hass?.callWS) {
+        return [];
+      }
+      const services = await this._hass.callWS({ type: 'get_services' });
+      const notifyServices = services?.notify ? Object.keys(services.notify) : [];
+      return notifyServices
+        .filter((serviceName) => serviceName.startsWith('mobile_app_'))
+        .map((serviceName) => `notify.${serviceName}`);
+    } catch (error) {
+      console.warn('KeePassXC OTP: Could not discover notify services:', error);
+      return [];
+    }
   }
 
   getCompanionMediaPlayerEntityId() {
