@@ -148,6 +148,7 @@ type: custom:keepassxc-otp-card
 | `title` | string | `🔐 KeePassXC OTP` | Card title | ✅ Text input |
 | `person_entity_id` | string | `null` | Filter by person entity | ✅ Dropdown selector |
 | `show_person` | boolean | `false` | Show person name in details | ✅ Checkbox |
+| `speak_delay_ms` | number | `5000` | Delay before voice playback starts | ✅ Number input |
 
 ---
 
