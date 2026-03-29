@@ -37,6 +37,20 @@ class KeePassXCOTPCardEditor extends HTMLElement {
               class="value"
             />
           </div>
+
+          <div class="option">
+            <label class="label">
+              <span>Speak Delay (ms)</span>
+              <span class="secondary">Delay before reading token aloud</span>
+            </label>
+            <input
+              type="number"
+              id="speak_delay_ms"
+              class="value"
+              min="0"
+              step="500"
+            />
+          </div>
         </div>
         <style>
           ${this.getStyles()}
@@ -53,6 +67,13 @@ class KeePassXCOTPCardEditor extends HTMLElement {
       const showPersonCheckbox = this.querySelector('#show_person');
       if (showPersonCheckbox) {
         showPersonCheckbox.checked = this._config.show_person === true;
+      }
+
+      const speakDelayInput = this.querySelector('#speak_delay_ms');
+      if (speakDelayInput) {
+        speakDelayInput.value = Number.isFinite(Number(this._config.speak_delay_ms))
+          ? String(Number(this._config.speak_delay_ms))
+          : '5000';
       }
       
       this._setupListeners();
@@ -76,6 +97,7 @@ class KeePassXCOTPCardEditor extends HTMLElement {
     const titleInput = this.querySelector('#title');
     const personSelect = this.querySelector('#person_entity_id');
     const showPersonCheckbox = this.querySelector('#show_person');
+    const speakDelayInput = this.querySelector('#speak_delay_ms');
 
     titleInput.addEventListener('change', (e) => {
       const value = e.target.value.trim();
@@ -97,6 +119,17 @@ class KeePassXCOTPCardEditor extends HTMLElement {
 
     showPersonCheckbox.addEventListener('change', (e) => {
       this._config.show_person = e.target.checked;
+      this._fireConfigChanged();
+    });
+
+    speakDelayInput.addEventListener('change', (e) => {
+      const parsed = Number(e.target.value);
+      if (Number.isFinite(parsed) && parsed >= 0) {
+        this._config.speak_delay_ms = Math.round(parsed);
+      } else {
+        this._config.speak_delay_ms = 5000;
+      }
+      e.target.value = String(this._config.speak_delay_ms);
       this._fireConfigChanged();
     });
   }
@@ -782,7 +815,7 @@ class KeePassXCOTPCard extends HTMLElement {
     button.dataset.stateAt = Date.now().toString();
     button.dataset.speakAt = (Date.now() + delayMs).toString();
 
-    const timeoutId = setTimeout(() => {
+    const runSpeak = () => {
       this._speakTimeouts.delete(entityId);
       const currentState = this._hass.states[entityId];
       const token = currentState ? this.getStableTokenForEntity(currentState) : null;
@@ -802,18 +835,26 @@ class KeePassXCOTPCard extends HTMLElement {
         console.error('KeePassXC OTP: Speech synthesis failed:', error);
         this.showSpeakErrorState(button);
       });
-    }, delayMs);
+    };
 
+    // Keep speech in the direct click call stack when delay is 0.
+    // Android Home Assistant Companion WebView may reject speech calls
+    // that happen asynchronously even with a zero-delay timeout.
+    if (delayMs <= 0) {
+      runSpeak();
+      return;
+    }
+
+    const timeoutId = setTimeout(runSpeak, delayMs);
     this._speakTimeouts.set(entityId, timeoutId);
   }
 
   getSpeakDelayMs() {
-    // Some mobile webviews can reject speech synthesis calls if there is a
-    // long delay after the user click. In Home Assistant Companion we speak
-    // immediately so it still counts as user-initiated.
-    const userAgent = navigator.userAgent || '';
-    const isCompanionApp = /Home\s?Assistant/i.test(userAgent);
-    return isCompanionApp ? 0 : 5000;
+    const configuredDelay = Number(this.config?.speak_delay_ms);
+    if (Number.isFinite(configuredDelay) && configuredDelay >= 0) {
+      return configuredDelay;
+    }
+    return 5000;
   }
 
   speakToken(token) {
@@ -826,6 +867,7 @@ class KeePassXCOTPCard extends HTMLElement {
         const speakableToken = String(token).split('').join(' ');
         const utterance = new SpeechSynthesisUtterance(speakableToken);
         let resolved = false;
+        let optimisticTimeout = null;
         let fallbackTimeout = null;
 
         const finish = (result) => {
@@ -833,9 +875,8 @@ class KeePassXCOTPCard extends HTMLElement {
             return;
           }
           resolved = true;
-          if (fallbackTimeout) {
-            clearTimeout(fallbackTimeout);
-          }
+          if (optimisticTimeout) clearTimeout(optimisticTimeout);
+          if (fallbackTimeout) clearTimeout(fallbackTimeout);
           resolve(result);
         };
 
@@ -844,8 +885,15 @@ class KeePassXCOTPCard extends HTMLElement {
         utterance.onstart = () => finish(true);
         utterance.onerror = () => finish(false);
 
-        // Some WebViews do not fire events reliably.
-        fallbackTimeout = setTimeout(() => finish(false), 2500);
+        // Some WebViews (including HA Companion on Android) can speak audio
+        // but never emit onstart/onend reliably. Treat a successful speak()
+        // call as success after a short grace period unless onerror fires.
+        optimisticTimeout = setTimeout(() => finish(true), 500);
+        fallbackTimeout = setTimeout(() => {
+          const synth = window.speechSynthesis;
+          const isActive = synth && (synth.speaking || synth.pending);
+          finish(Boolean(isActive));
+        }, 2500);
 
         window.speechSynthesis.cancel();
         window.speechSynthesis.speak(utterance);
