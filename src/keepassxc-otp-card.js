@@ -608,6 +608,7 @@ class KeePassXCOTPCard extends HTMLElement {
         const speakableToken = String(token).split('').join(' ');
         const utterance = new SpeechSynthesisUtterance(speakableToken);
         let resolved = false;
+        let optimisticTimeout = null;
         let fallbackTimeout = null;
 
         const finish = (result) => {
@@ -615,9 +616,8 @@ class KeePassXCOTPCard extends HTMLElement {
             return;
           }
           resolved = true;
-          if (fallbackTimeout) {
-            clearTimeout(fallbackTimeout);
-          }
+          if (optimisticTimeout) clearTimeout(optimisticTimeout);
+          if (fallbackTimeout) clearTimeout(fallbackTimeout);
           resolve(result);
         };
 
@@ -626,8 +626,15 @@ class KeePassXCOTPCard extends HTMLElement {
         utterance.onstart = () => finish(true);
         utterance.onerror = () => finish(false);
 
-        // Some WebViews do not fire events reliably.
-        fallbackTimeout = setTimeout(() => finish(false), 2500);
+        // Some WebViews (including HA Companion on Android) can speak audio
+        // but never emit onstart/onend reliably. Treat a successful speak()
+        // call as success after a short grace period unless onerror fires.
+        optimisticTimeout = setTimeout(() => finish(true), 500);
+        fallbackTimeout = setTimeout(() => {
+          const synth = window.speechSynthesis;
+          const isActive = synth && (synth.speaking || synth.pending);
+          finish(Boolean(isActive));
+        }, 2500);
 
         window.speechSynthesis.cancel();
         window.speechSynthesis.speak(utterance);
