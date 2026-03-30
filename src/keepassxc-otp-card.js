@@ -1,13 +1,12 @@
 class KeePassXCOTPCard extends HTMLElement {
   constructor() {
     super();
-    this._rendered = false;  // Track if we've done initial render
-    this._entities = [];     // Store current entities
-    this._animationFrameId = null;  // Track animation frame
-    this._lastUpdateTime = 0;  // Track last update timestamp
-    this._speakTimeouts = new Map(); // Track delayed speak timers
-    this._stableTokens = new Map(); // Keep token stable within one OTP time slice
-    this._notifyPromptShown = false;
+    this._rendered = false;
+    this._entities = [];
+    this._intervalId = null;
+    this._speakTimeouts = new Map();
+    this._stableTokens = new Map();
+    this._cachedCompanionNotifyService = null;
   }
 
   setConfig(config) {
@@ -20,7 +19,7 @@ class KeePassXCOTPCard extends HTMLElement {
       const card = document.createElement('ha-card');
       card.innerHTML = `
         <div class="card-header">
-          <div class="name">${config.title || '🔐 KeePassXC OTP'}</div>
+          <div class="name"></div>
         </div>
         <div class="card-content" id="otp-container">
           <div class="loading">Loading OTP tokens...</div>
@@ -29,62 +28,47 @@ class KeePassXCOTPCard extends HTMLElement {
           ${this.getStyles()}
         </style>
       `;
+      // Set title via textContent to prevent XSS
+      card.querySelector('.name').textContent = config.title || '🔐 KeePassXC OTP';
       this.appendChild(card);
       this.content = this.querySelector('#otp-container');
     }
-    
-    // Start animation loop (replaces setInterval)
-    this.startAnimationLoop();
+
+    this.startUpdateInterval();
+  }
+
+  connectedCallback() {
+    // Restart interval when card is re-attached to the DOM (e.g. tab switch)
+    if (this.config && !this._intervalId) {
+      this.startUpdateInterval();
+    }
   }
 
   disconnectedCallback() {
-    // Clean up animation frame when card is removed
-    if (this._animationFrameId) {
-      cancelAnimationFrame(this._animationFrameId);
-      this._animationFrameId = null;
-    }
+    this.stopUpdateInterval();
 
     this._speakTimeouts.forEach((timeoutId) => clearTimeout(timeoutId));
     this._speakTimeouts.clear();
     this._stableTokens.clear();
   }
 
-  startAnimationLoop() {
-    // Stop any existing animation loop
-    if (this._animationFrameId) {
-      cancelAnimationFrame(this._animationFrameId);
-    }
-    
-    const animate = () => {
+  startUpdateInterval() {
+    this.stopUpdateInterval();
+    this._intervalId = setInterval(() => {
       try {
-        // Update gauges and button states
-        this.updateGaugesAndButtons();
-        
-        // Schedule next frame
-        this._animationFrameId = requestAnimationFrame(animate);
+        this.updateGauges();
+        this.updateButtonStates();
       } catch (error) {
-        console.error('KeePassXC OTP Card: Animation loop error:', error);
-        // Self-healing: clear animation ID and restart loop after error
-        this._animationFrameId = null;
-        setTimeout(() => this.startAnimationLoop(), 1000);
+        console.error('KeePassXC OTP Card: Update error:', error);
       }
-    };
-    
-    // Start the loop
-    this._animationFrameId = requestAnimationFrame(animate);
+    }, 1000);
   }
 
-  updateGaugesAndButtons() {
-    // Throttle to 1 second intervals using timestamp comparison
-    const now = Date.now();
-    if (now - this._lastUpdateTime < 1000) {
-      return;  // Skip this frame
+  stopUpdateInterval() {
+    if (this._intervalId) {
+      clearInterval(this._intervalId);
+      this._intervalId = null;
     }
-    this._lastUpdateTime = now;
-    
-    // Update both gauges and button states
-    this.updateGauges();
-    this.updateButtonStates();
   }
 
   updateGauges() {
@@ -336,8 +320,7 @@ class KeePassXCOTPCard extends HTMLElement {
       const tokenElement = this.content.querySelector(`.otp-token[data-entity-id="${entity.entity_id}"]`);
       if (tokenElement) {
         const token = this.getStableTokenForEntity(entity);
-        const digits = entity.attributes.digits || token.length;
-        const formattedToken = this.formatToken(token, digits);
+        const formattedToken = this.formatToken(token);
         tokenElement.textContent = formattedToken;
       }
     });
@@ -358,25 +341,17 @@ class KeePassXCOTPCard extends HTMLElement {
     return existing.token;
   }
 
-  formatToken(token, digits) {
-    // Format token with space in the middle for readability
-    // Works for 6 digits (123 456), 8 digits (1234 5678), etc.
+  formatToken(token) {
     if (!token || token.length === 0) {
       return token;
     }
-    
-    // Use actual token length for split position to handle any length correctly
     const half = Math.floor(token.length / 2);
-    // Use non-breaking space to avoid line wrap between token groups on mobile
     return token.slice(0, half) + '\u00A0' + token.slice(half);
   }
 
   renderOTPEntry(entity) {
     const token = this.getStableTokenForEntity(entity);
     const period = entity.attributes.period || 30;
-    const digits = entity.attributes.digits || token.length;
-    const issuer = entity.attributes.issuer || '';
-    const account = entity.attributes.account || '';
     const name = entity.attributes.friendly_name || entity.entity_id;
     const url = entity.attributes.url || null;
     const username = entity.attributes.username || null;
@@ -392,7 +367,7 @@ class KeePassXCOTPCard extends HTMLElement {
     if (percentage < 33) gaugeColor = '#f44336'; // red
     
     // Format token with space in middle for readability
-    const formattedToken = this.formatToken(token, digits);
+    const formattedToken = this.formatToken(token);
     
     // Build details line: Username • clickable URL
     let detailsHtml = '';
@@ -439,7 +414,7 @@ class KeePassXCOTPCard extends HTMLElement {
           </svg>
         </div>
         <div class="otp-info">
-          <div class="otp-name">${name}</div>
+          <div class="otp-name">${this.escapeHtml(name)}</div>
           <div class="otp-token-row">
             <div class="otp-token" data-entity-id="${entity.entity_id}">${formattedToken}</div>
             <div class="otp-actions">
@@ -464,55 +439,38 @@ class KeePassXCOTPCard extends HTMLElement {
     const token = state ? this.getStableTokenForEntity(state) : '';
     
     try {
-      // Try modern Clipboard API first (requires HTTPS or localhost)
       if (navigator.clipboard && window.isSecureContext) {
         await navigator.clipboard.writeText(token);
-        this.showCopiedState(button, entityId);
       } else {
-        // Fallback for HTTP or older browsers
         this.copyToClipboardFallback(token);
-        this.showCopiedState(button, entityId);
       }
+      this.showCopiedState(button);
     } catch (err) {
-      console.error('Copy failed, trying fallback:', err);
-      try {
-        this.copyToClipboardFallback(token);
-        this.showCopiedState(button, entityId);
-      } catch (fallbackErr) {
-        console.error('Fallback copy also failed:', fallbackErr);
-        this.showErrorState(button, entityId);
-      }
+      console.error('Copy failed:', err);
+      this.showErrorState(button);
     }
   }
 
-  showCopiedState(button, entityId) {
-    // Store state as data attribute with timestamp
+  showCopiedState(button) {
     button.dataset.state = 'copied';
     button.dataset.copiedAt = Date.now().toString();
-    
-    // Update button content immediately
+
     const icon = button.querySelector('.copy-icon');
     const text = button.querySelector('.copy-text');
-    
+
     if (icon) icon.textContent = '✅';
     if (text) text.textContent = 'Copied!';
-    
-    // No timeout needed - updateButtonStates() will clean it up
   }
 
-  showErrorState(button, entityId) {
-    // Store state as data attribute with timestamp
+  showErrorState(button) {
     button.dataset.state = 'error';
     button.dataset.copiedAt = Date.now().toString();
-    
-    // Update button content immediately
+
     const icon = button.querySelector('.copy-icon');
     const text = button.querySelector('.copy-text');
-    
+
     if (icon) icon.textContent = '❌';
     if (text) text.textContent = 'Error!';
-    
-    // No timeout needed - updateButtonStates() will clean it up
   }
 
   copyToClipboardFallback(text) {
@@ -895,23 +853,8 @@ class KeePassXCOTPCard extends HTMLElement {
       });
     }
 
-    if (typeof window.prompt !== 'function') {
-      return null;
-    }
-    const defaultValue = preselected || discovered[0] || 'notify.mobile_app_';
-    const entered = window.prompt(
-      'KeePassXC OTP: Bitte notify Service eingeben (z.B. notify.mobile_app_s26ultra)',
-      defaultValue
-    );
-    if (!entered) {
-      return null;
-    }
-    const normalized = entered.trim();
-    if (!/^notify\.mobile_app_[a-z0-9_]+$/i.test(normalized)) {
-      console.warn('KeePassXC OTP: Invalid notify service entered:', normalized);
-      return null;
-    }
-    return normalized;
+    console.warn('KeePassXC OTP: No mobile_app notify services discovered');
+    return null;
   }
 
   formatNotifyServiceForDisplay(serviceName) {
@@ -1235,7 +1178,7 @@ class KeePassXCOTPCard extends HTMLElement {
   }
 
   getCardSize() {
-    return 3;
+    return Math.max(1, this._entities.length) + 1;
   }
 
   static getConfigElement() {
